@@ -1,19 +1,25 @@
 import sqlite3
 import os
+import enum
 from contextlib import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import logging
 from mcp.server.fastmcp import FastMCP, Context
 
+logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger("browser-storage-mcp")
 
 FIREFOX_PROFILE_DIR = "`/Users/eleanor.mazzarella/Library/Application Support/Firefox/Profiles/l42msng6.default-release`" 
 
 PATH_TO_FIREFOX_HISTORY = os.path.join(FIREFOX_PROFILE_DIR, "places.sqlite")
 
-logging.basicConfig(level=logging.INFO)
+@dataclass(frozen=True)
+class BrowserType(enum.Enum):
+    FIREFOX = "firefox"
+    CHROME = "chrome" 
 
-logger = logging.getLogger("browser-storage-mcp")
 
 mcp = FastMCP("firefox-history")
 
@@ -36,41 +42,29 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 mcp = FastMCP("firefox-history", lifespan=app_lifespan)
 
 @mcp.prompt()
-def explore_firefox_history() -> str:
-    """Create a prompt to explore the Firefox history"""
+def productivity_analysis() -> str:
+    """Creates a user prompt for analyzing productivity"""
     return """
-    I can help you explore your Firefox history.  
-
-    Here are some of the things I can do:
-    - I can list all of the sites you visited today or in the last week.
+    Focus on work vs. entertainment ratios, identify time sinks, suggest optimizations.
+    Group history by "session", which can be inferred by the gap between timestamps.
+    For example, a "session" might be a period of time with no more than 2 hours between visits.
     """
 
-@mcp.prompt()
-def analyze_firefox_history(number_of_days: int) -> str:
-    """Analyze the Firefox history"""
-    return f"""
-    I can analyze the Firefox history from the past '{number_of_days}' days.
+def learning_analysis() -> str:
+    """Creates a user prompt for analyzing learning"""
+    return """
+    Analyze the browser history through the lens of learning and research. Try to infer when
+    a url was visited in order to solve a specific problem versus when it was visited for general purpose understanding.
+    If you think any URLs were visited in order for a "quick fix" or "quick answer", group this into a special section
+    where there are opportunities for deeper understanding and more lasting learning.
 
-    I can help you understand:
-    - What sites you visited the most
-    - What common themes arise from your browsing history
-    - Areas you have been focusing on in the past {number_of_days} days
+    Group history by "session", which can be inferred by the gap between timestamps.
+    For example, a "session" might be a period of time with no more than 2 hours between visits.
     """
-
-@mcp.prompt()
-def create_firefox_history_report(number_of_days: int) -> str:
-    """Create a report of the Firefox history"""
-    return f"""
-    I can create a report of the Firefox history from the past '{number_of_days}' days.
-
-    The report will be in markdown with a clear structure, and will be saved to a file in the current directory.
-    """
-
 
 
 @mcp.tool()
-async def get_history(context: AppContext, query: str) -> list[str]:
-    """Get history from Firefox"""
+async def get_browser_history(context: AppContext, time_period_in_days: int, browser_type: BrowserType) -> list[str]:
+    """Get history from Firefox or Chrome"""
     cursor = context.db.cursor()
-    cursor.execute("SELECT url FROM moz_places WHERE url LIKE ?", (f"%{query}%",))
-    return [row[0] for row in cursor.fetchall()]
+# TODO
