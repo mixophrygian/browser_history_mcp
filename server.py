@@ -1,16 +1,17 @@
 import sqlite3
 import os
 import enum
-from contextlib import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-from typing import Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP, Context
+import asyncio
 from urllib.parse import urlparse
 from collections import Counter, defaultdict
 import re
+from functools import lru_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("browser-storage-mcp")
@@ -23,11 +24,6 @@ PATH_TO_FIREFOX_HISTORY = os.path.join(FIREFOX_PROFILE_DIR, "places.sqlite")
 # PATH_TO_CHROME_HISTORY = os.path.join(CHROME_HISTORY_DIR, "History")
 
 @dataclass(frozen=True)
-class BrowserType(enum.Enum):
-    FIREFOX = "firefox"
-    #CHROME = "chrome"
-
-@dataclass
 class HistoryEntry:
     """Represents a single browser history entry"""
     url: str
@@ -45,40 +41,10 @@ class HistoryEntry:
 
 @dataclass
 class AppContext:
-    firefox_db: sqlite3.Connection
-    chrome_db: sqlite3.Connection
+    firefox_db: Optional[sqlite3.Connection]
+    chrome_db: Optional[sqlite3.Connection]
 
-@asynccontextmanager
-async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
-    """Manage application lifecycle with type-safe context"""
-    firefox_db = None
-    chrome_db = None
-    
-    try:
-        # Initialize Firefox connection
-        if os.path.exists(PATH_TO_FIREFOX_HISTORY):
-            firefox_db = sqlite3.connect(PATH_TO_FIREFOX_HISTORY)
-            logger.info("Connected to Firefox history database")
-        else:
-            logger.warning(f"Firefox history not found at {PATH_TO_FIREFOX_HISTORY}")
-            
-        # Initialize Chrome connection
-        # if os.path.exists(PATH_TO_CHROME_HISTORY):
-        #     chrome_db = sqlite3.connect(PATH_TO_CHROME_HISTORY)
-        #     logger.info("Connected to Chrome history database")
-        # else:
-        #     logger.warning(f"Chrome history not found at {PATH_TO_CHROME_HISTORY}")
-            
-        yield AppContext(firefox_db=firefox_db, chrome_db=chrome_db)
-        
-    finally:
-        if firefox_db:
-            firefox_db.close()
-        if chrome_db:
-            chrome_db.close()
-
-# Create server with lifespan
-mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.",  lifespan=app_lifespan)
+mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
 
 @mcp.prompt()
 def productivity_analysis() -> str:
@@ -190,38 +156,51 @@ def research_topic_extraction() -> str:
     Format as a research notebook with topics, key findings, and open questions.
     """
 
-def _get_firefox_history(db: sqlite3.Connection, days: int) -> List[HistoryEntry]:
+def _get_firefox_history(days: int) -> List[HistoryEntry]:
     """Get Firefox history from the last N days"""
-    cursor = db.cursor()
+        # Check if database exists
+    if not os.path.exists(PATH_TO_FIREFOX_HISTORY):
+        raise RuntimeError(f"Firefox history not found at {PATH_TO_FIREFOX_HISTORY}")
     
-    # Firefox stores timestamps as microseconds since Unix epoch
-    cutoff_time = (datetime.now() - timedelta(days=days)).timestamp() * 1_000_000
-    
-    query = """
-    SELECT DISTINCT h.url, h.title, h.visit_count, h.last_visit_date
-    FROM moz_places h
-    WHERE h.last_visit_date > ? 
-    AND h.hidden = 0
-    AND h.url NOT LIKE 'moz-extension://%'
-    ORDER BY h.last_visit_date DESC
-    """
-    
-    cursor.execute(query, (cutoff_time,))
-    results = cursor.fetchall()
-    
-    entries = []
-    for url, title, visit_count, last_visit_date in results:
-        # Convert Firefox timestamp (microseconds) to datetime
-        visit_time = datetime.fromtimestamp(last_visit_date / 1_000_000)
+    # Connect to the database
+    conn = sqlite3.connect(f"file:{PATH_TO_FIREFOX_HISTORY}?mode=ro", uri=True)
+    try:
+        cursor = conn.cursor()
         
-        entries.append(HistoryEntry(
-            url=url or "",
-            title=title,
-            visit_count=visit_count or 0,
-            last_visit_time=visit_time
-        ))
-    
-    return entries
+        # Firefox stores timestamps as microseconds since Unix epoch
+        cutoff_time = (datetime.now() - timedelta(days=days)).timestamp() * 1_000_000
+        
+        query = """
+        SELECT DISTINCT h.url, h.title, h.visit_count, h.last_visit_date
+        FROM moz_places h
+        WHERE h.last_visit_date > ? 
+        AND h.hidden = 0
+        AND h.url NOT LIKE 'moz-extension://%'
+        ORDER BY h.last_visit_date DESC
+        """
+        
+        cursor.execute(query, (cutoff_time,))
+        results = cursor.fetchall()
+        
+        entries = []
+        for url, title, visit_count, last_visit_date in results:
+            # Convert Firefox timestamp (microseconds) to datetime
+            visit_time = datetime.fromtimestamp(last_visit_date / 1_000_000)
+            
+            entries.append(HistoryEntry(
+                url=url or "",
+                title=title,
+                visit_count=visit_count or 0,
+                last_visit_time=visit_time
+            ))
+        
+        return entries
+    except Exception as e:
+        logger.error(f"Error querying Firefox history: {e}")
+        raise RuntimeError(f"Failed to query Firefox history: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 # def _get_chrome_history(db: sqlite3.Connection, days: int) -> List[HistoryEntry]:
 #     """Get Chrome history from the last N days"""
@@ -261,18 +240,20 @@ def _get_firefox_history(db: sqlite3.Connection, days: int) -> List[HistoryEntry
 #     return entries
 
 @mcp.tool()
-async def get_browser_history(context: AppContext, time_period_in_days: int, browser_type: BrowserType) -> List[Dict]:
-    """Get browser history from Firefox for the specified time period in days"""
+async def get_browser_history(time_period_in_days: int, browser_type: str = "firefox") -> List[Dict]:
+    """Get browser history from Firefox for the specified time period in days.
+    
+    Args:
+        time_period_in_days: Number of days of history to retrieve
+        browser_type: Browser type (currently only 'firefox' is supported)
+    """
     
     if time_period_in_days <= 0:
         raise ValueError("time_period_in_days must be a positive integer")
     
-    if browser_type == BrowserType.FIREFOX:
-        if not context.firefox_db:
-            raise RuntimeError("Firefox database not available")
-        
+    if browser_type == "firefox":
         try:
-            entries = _get_firefox_history(context.firefox_db, time_period_in_days)
+            entries = _get_firefox_history(time_period_in_days)
             logger.info(f"Retrieved {len(entries)} Firefox history entries from last {time_period_in_days} days")
             return [entry.to_dict() for entry in entries]
         except sqlite3.Error as e:
@@ -295,8 +276,13 @@ async def get_browser_history(context: AppContext, time_period_in_days: int, bro
     #     raise ValueError(f"Unsupported browser type: {browser_type}")
 
 @mcp.tool()
-async def group_browsing_history_into_sessions(context: AppContext, history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
-    """Group browser history into sessions based on time gaps"""
+async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
+    """Group browser history into sessions based on time gaps.
+    
+    Args:
+        history_data: List of history entries from get_browser_history
+        max_gap_hours: Maximum hours between visits to consider same session
+    """
     
     if not history_data:
         return []
@@ -350,8 +336,13 @@ async def group_browsing_history_into_sessions(context: AppContext, history_data
 
 
 @mcp.tool()
-async def categorize_browsing_history(context: AppContext, history_data: List[Dict]) -> Dict[str, List[Dict]]:
-    """Categorize URLs into meaningful groups"""
+@lru_cache(maxsize=1000)
+async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, List[Dict]]:
+    """Categorize URLs into meaningful groups.
+    
+    Args:
+        history_data: List of history entries from get_browser_history
+    """
     
     categories = {
         'social_media': ['facebook.com', 'twitter.com', 'instagram.com', 'reddit.com', 'linkedin.com'],
@@ -395,8 +386,14 @@ async def categorize_browsing_history(context: AppContext, history_data: List[Di
     return result
 
 @mcp.tool()
-async def analyze_domain_frequency(context: AppContext, history_data: List[Dict], top_n: int = 20) -> List[Dict]:
-    """Analyze most frequently visited domains"""
+@lru_cache(maxsize=1000)
+async def analyze_domain_frequency(history_data: List[Dict], top_n: int = 20) -> List[Dict]:
+    """Analyze most frequently visited domains.
+    
+    Args:
+        history_data: List of history entries from get_browser_history
+        top_n: Number of top domains to return
+    """
     
     domain_stats = defaultdict(lambda: {'count': 0, 'total_visits': 0, 'titles': set()})
     
@@ -424,8 +421,12 @@ async def analyze_domain_frequency(context: AppContext, history_data: List[Dict]
     return domain_list[:top_n]
 
 @mcp.tool()
-async def find_learning_paths(context: AppContext, history_data: List[Dict]) -> List[Dict]:
-    """Identify learning progressions in browsing history"""
+async def find_learning_paths(history_data: List[Dict]) -> List[Dict]:
+    """Identify learning progressions in browsing history.
+    
+    Args:
+        history_data: List of history entries from get_browser_history
+    """
     
     # Common learning indicators in URLs
     learning_patterns = {
@@ -490,8 +491,12 @@ async def find_learning_paths(context: AppContext, history_data: List[Dict]) -> 
     return learning_sessions
 
 @mcp.tool()
-async def calculate_productivity_metrics(context: AppContext, categorized_data: Dict[str, Dict]) -> Dict:
-    """Calculate productivity metrics from categorized browsing data"""
+async def calculate_productivity_metrics(categorized_data: Dict[str, Dict]) -> Dict:
+    """Calculate productivity metrics from categorized browsing data.
+    
+    Args:
+        categorized_data: Categorized browsing data from categorize_browsing_history
+    """
     
     productive_categories = {'development', 'learning', 'productivity'}
     unproductive_categories = {'social_media', 'entertainment', 'shopping'}
