@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict, List, Optional
 from mcp.server.fastmcp import FastMCP, Context
+from urllib.parse import urlparse
+from collections import Counter, defaultdict
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("browser-storage-mcp")
@@ -343,6 +346,186 @@ async def group_browsing_history_into_sessions(context: AppContext, history_data
     
     logger.info(f"Grouped {len(history_data)} entries into {len(sessions)} sessions")
     return sessions
+
+
+
+@mcp.tool()
+async def categorize_browsing_history(context: AppContext, history_data: List[Dict]) -> Dict[str, List[Dict]]:
+    """Categorize URLs into meaningful groups"""
+    
+    categories = {
+        'social_media': ['facebook.com', 'twitter.com', 'instagram.com', 'reddit.com', 'linkedin.com'],
+        'entertainment': ['youtube.com', 'x.com', 'stardewvalleywiki.com'],
+        'development': ['stackoverflow.com', 'developer.mozilla.org', 'docs.python.org'],
+        'learning': ['coursera.org', 'udemy.com', 'khanacademy.org', 'medium.com', 'github.com'],
+        'productivity': ['notion.so', 'trello.com', 'asana.com', 'todoist.com'],
+        'news': ['nytimes.com', 'bbc.com', 'reuters.com', 'arstechnica.com'],
+        'shopping': ['amazon.com', 'ebay.com', 'etsy.com', 'apple.com'],
+        'search': ['google.com', 'bing.com', 'duckduckgo.com']
+    }
+    
+    categorized = defaultdict(list)
+    uncategorized = []
+    
+    for entry in history_data:
+        domain = urlparse(entry['url']).netloc.lower()
+        categorized_flag = False
+        
+        for category, domains in categories.items():
+            if any(d in domain for d in domains):
+                categorized[category].append(entry)
+                categorized_flag = True
+                break
+        
+        if not categorized_flag:
+            uncategorized.append(entry)
+    
+    categorized['other'] = uncategorized
+    
+    # Add statistics
+    result = {}
+    for category, entries in categorized.items():
+        result[category] = {
+            'entries': entries,
+            'count': len(entries),
+            'unique_domains': len(set(urlparse(e['url']).netloc for e in entries)),
+            'total_visits': sum(e.get('visit_count', 1) for e in entries)
+        }
+    
+    return result
+
+@mcp.tool()
+async def analyze_domain_frequency(context: AppContext, history_data: List[Dict], top_n: int = 20) -> List[Dict]:
+    """Analyze most frequently visited domains"""
+    
+    domain_stats = defaultdict(lambda: {'count': 0, 'total_visits': 0, 'titles': set()})
+    
+    for entry in history_data:
+        domain = urlparse(entry['url']).netloc
+        if domain:
+            domain_stats[domain]['count'] += 1
+            domain_stats[domain]['total_visits'] += entry.get('visit_count', 1)
+            if entry.get('title'):
+                domain_stats[domain]['titles'].add(entry['title'])
+    
+    # Convert to list and sort by visit count
+    domain_list = []
+    for domain, stats in domain_stats.items():
+        domain_list.append({
+            'domain': domain,
+            'unique_pages': stats['count'],
+            'total_visits': stats['total_visits'],
+            'sample_titles': list(stats['titles'])[:5]  # Keep only 5 sample titles
+        })
+    
+    # Sort by total visits
+    domain_list.sort(key=lambda x: x['total_visits'], reverse=True)
+    
+    return domain_list[:top_n]
+
+@mcp.tool()
+async def find_learning_paths(context: AppContext, history_data: List[Dict]) -> List[Dict]:
+    """Identify learning progressions in browsing history"""
+    
+    # Common learning indicators in URLs
+    learning_patterns = {
+        'tutorial': r'tutorial|guide|learn|course',
+        'documentation': r'docs|documentation|reference|api',
+        'questions': r'stackoverflow|how-to|what-is|why-does',
+        'examples': r'example|demo|sample|code',
+        'video': r'youtube.*watch|video|lecture'
+    }
+    
+    learning_sessions = []
+    
+    # Group by programming languages or technologies
+    tech_patterns = {
+        'python': r'python|django|flask|pandas|numpy',
+        'javascript': r'javascript|js|react|vue|angular|node',
+        'rust': r'rust-lang|rust',
+        'go': r'golang|go-lang',
+        'machine_learning': r'tensorflow|pytorch|scikit|ml|machine-learning',
+        'web': r'html|css|web-dev|frontend|backend'
+    }
+    
+    tech_visits = defaultdict(list)
+    
+    for entry in history_data:
+        url_lower = entry['url'].lower()
+        title_lower = (entry.get('title') or '').lower()
+        
+        # Check which technology this might be about
+        for tech, pattern in tech_patterns.items():
+            if re.search(pattern, url_lower) or re.search(pattern, title_lower):
+                
+                # Check what type of learning resource
+                resource_type = 'general'
+                for rtype, rpattern in learning_patterns.items():
+                    if re.search(rpattern, url_lower):
+                        resource_type = rtype
+                        break
+                
+                tech_visits[tech].append({
+                    'entry': entry,
+                    'resource_type': resource_type
+                })
+    
+    # Analyze progression for each technology
+    for tech, visits in tech_visits.items():
+        if len(visits) >= 3:  # Need at least 3 visits to show a pattern
+            # Sort by time
+            visits.sort(key=lambda x: x['entry']['last_visit_time'])
+            
+            learning_sessions.append({
+                'technology': tech,
+                'visit_count': len(visits),
+                'resource_types': Counter(v['resource_type'] for v in visits),
+                'time_span': {
+                    'start': visits[0]['entry']['last_visit_time'],
+                    'end': visits[-1]['entry']['last_visit_time']
+                },
+                'sample_resources': [v['entry'] for v in visits[:5]]
+            })
+    
+    return learning_sessions
+
+@mcp.tool()
+async def calculate_productivity_metrics(context: AppContext, categorized_data: Dict[str, Dict]) -> Dict:
+    """Calculate productivity metrics from categorized browsing data"""
+    
+    productive_categories = {'development', 'learning', 'productivity'}
+    unproductive_categories = {'social_media', 'entertainment', 'shopping'}
+    
+    total_visits = sum(cat['total_visits'] for cat in categorized_data.values())
+    productive_visits = sum(categorized_data.get(cat, {}).get('total_visits', 0) 
+                           for cat in productive_categories)
+    unproductive_visits = sum(categorized_data.get(cat, {}).get('total_visits', 0) 
+                             for cat in unproductive_categories)
+    
+    metrics = {
+        'productivity_ratio': productive_visits / total_visits if total_visits > 0 else 0,
+        'distraction_ratio': unproductive_visits / total_visits if total_visits > 0 else 0,
+        'productive_visits': productive_visits,
+        'unproductive_visits': unproductive_visits,
+        'total_visits': total_visits,
+        'top_productive_sites': [],
+        'top_distraction_sites': []
+    }
+    
+    # Get top sites from each category
+    for cat in productive_categories:
+        if cat in categorized_data:
+            entries = categorized_data[cat]['entries']
+            domains = Counter(urlparse(e['url']).netloc for e in entries)
+            metrics['top_productive_sites'].extend(domains.most_common(3))
+    
+    for cat in unproductive_categories:
+        if cat in categorized_data:
+            entries = categorized_data[cat]['entries']
+            domains = Counter(urlparse(e['url']).netloc for e in entries)
+            metrics['top_distraction_sites'].extend(domains.most_common(3))
+    
+    return metrics
 
 if __name__ == "__main__":
     mcp.run()
