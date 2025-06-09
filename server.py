@@ -75,27 +75,116 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             chrome_db.close()
 
 # Create server with lifespan
-mcp = FastMCP("browser-history", lifespan=app_lifespan)
+mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.",  lifespan=app_lifespan)
 
 @mcp.prompt()
 def productivity_analysis() -> str:
-    """Creates a user prompt for analyzing productivity"""
+    """Creates a comprehensive productivity analysis prompt"""
     return """
-    Focus on work vs. entertainment ratios, identify time sinks, suggest optimizations.
-    Group history by "session", which can be inferred by the gap between timestamps.
-    For example, a "session" might be a period of time with no more than 2 hours between visits.
+    Analyze the browser history to provide actionable productivity insights:
+    
+    1. **Time Distribution Analysis**
+       - Calculate percentage of time on work-related vs entertainment sites
+       - Identify peak productivity hours based on work-site visits
+       - Show time spent per domain/category
+    
+    2. **Session Pattern Recognition**
+       - Group visits into sessions (max 2-hour gaps between visits)
+       - Identify "rabbit hole" sessions (many related searches in sequence)
+       - Flag sessions that started productive but drifted
+    
+    3. **Focus Metrics**
+       - Average session duration on productive sites
+       - Number of context switches between work and entertainment
+       - Longest uninterrupted work sessions
+    
+    4. **Actionable Recommendations**
+       - Top 3 time-sink websites to consider blocking
+       - Optimal work hours based on historical patterns
+       - Specific habits to change (e.g., "You check Reddit 15x/day on average")
+    
+    Present findings in a clear format with specific numbers and time periods.
     """
 
 @mcp.prompt()
 def learning_analysis() -> str:
-    """Creates a user prompt for analyzing learning"""
+    """Creates a deep learning pattern analysis prompt"""
     return """
-    Analyze the browser history through the lens of learning and research. Try to infer when
-    a url was visited in order to solve a specific problem versus when it was visited for general purpose understanding.
-    If you think any URLs were visited in order for a "quick fix" or "quick answer", group this into a special section
-    where there are opportunities for deeper understanding and more lasting learning.
-    Group history by "session", which can be inferred by the gap between timestamps.
-    For example, a "session" might be a period of time with no more than 2 hours between visits.
+    Analyze browser history through the lens of learning effectiveness:
+    
+    1. **Learning Pattern Classification**
+       - **Deep Learning**: Extended visits to documentation, tutorials, courses
+       - **Quick Fixes**: Stack Overflow visits < 2 minutes, copy-paste solutions
+       - **Research Sessions**: Multiple related sources in sequence
+       - **Reference Checks**: Repeated visits to same documentation
+    
+    2. **Knowledge Building Analysis**
+       - Identify learning trajectories (beginner → advanced topics)
+       - Spot knowledge gaps (frequent searches for same concepts)
+       - Track progression in specific technologies/topics
+    
+    3. **Learning Quality Metrics**
+       - Average time on educational content
+       - Depth score: ratio of documentation/tutorial time vs quick-answer sites
+       - Learning velocity: new topics explored per week
+    
+    4. **Improvement Opportunities**
+       - Topics frequently searched but never deeply studied
+       - Suggest foundational resources for frequently accessed quick-fixes
+       - Recommend structured learning paths based on scattered searches
+    
+    5. **Session Analysis**
+       - Group by learning sessions (2-hour gap threshold)
+       - Identify most productive learning times
+       - Flag interrupted learning sessions
+    
+    Format as actionable insights with specific examples from the history.
+    """
+
+@mcp.prompt()
+def privacy_audit() -> str:
+    """Creates a privacy and security analysis prompt"""
+    return """
+    Analyze browser history for privacy and security concerns:
+    
+    1. **Sensitive Information Exposure**
+       - Identify URLs containing personal information
+       - Flag unencrypted (http://) site visits
+       - Detect potential phishing domains
+    
+    2. **Digital Footprint Analysis**
+       - Most frequently visited sites
+       - Sites with account access (login pages)
+       - Third-party tracker exposure estimate
+    
+    3. **Recommendations**
+       - Sites that should use password manager
+       - Candidates for private browsing
+       - Services to consider replacing with privacy-focused alternatives
+    """
+
+@mcp.prompt()
+def research_topic_extraction() -> str:
+    """Extract and summarize research topics from browsing history"""
+    return """
+    Identify and summarize research topics from browsing patterns:
+    
+    1. **Topic Clustering**
+       - Group related searches and visits into research topics
+       - Identify primary research questions being explored
+       - Track evolution of research focus over time
+    
+    2. **Research Depth Analysis**
+       - Surface-level vs deep-dive research sessions
+       - Number of sources consulted per topic
+       - Time invested per research topic
+    
+    3. **Knowledge Synthesis**
+       - Create brief summaries of main research findings per topic
+       - Identify unanswered questions or incomplete research
+       - Suggest next steps for each research thread
+    
+    Format as a research notebook with topics, key findings, and open questions.
     """
 
 def _get_firefox_history(db: sqlite3.Connection, days: int) -> List[HistoryEntry]:
@@ -170,7 +259,7 @@ def _get_firefox_history(db: sqlite3.Connection, days: int) -> List[HistoryEntry
 
 @mcp.tool()
 async def get_browser_history(context: AppContext, time_period_in_days: int, browser_type: BrowserType) -> List[Dict]:
-    """Get browser history from Firefox or Chrome for the specified time period"""
+    """Get browser history from Firefox for the specified time period in days"""
     
     if time_period_in_days <= 0:
         raise ValueError("time_period_in_days must be a positive integer")
@@ -203,7 +292,7 @@ async def get_browser_history(context: AppContext, time_period_in_days: int, bro
     #     raise ValueError(f"Unsupported browser type: {browser_type}")
 
 @mcp.tool()
-async def analyze_browsing_sessions(context: AppContext, history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
+async def group_browsing_history_into_sessions(context: AppContext, history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
     """Group browser history into sessions based on time gaps"""
     
     if not history_data:
