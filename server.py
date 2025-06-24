@@ -51,7 +51,7 @@ def get_firefox_history_path() -> Optional[str]:
     profile_path = get_firefox_profile_path()
     if not profile_path:
         return None
-    
+     
     history_path = os.path.join(profile_path, "places.sqlite")
     if os.path.exists(history_path):
         return history_path
@@ -59,12 +59,49 @@ def get_firefox_history_path() -> Optional[str]:
         logger.warning(f"Firefox history database not found at: {history_path}")
         return None
 
-# Get Firefox paths automatically
-PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
+def get_chrome_profile_path() -> Optional[str]:
+    """Automatically detect Chrome profile directory based on OS"""
+    system = platform.system().lower()
+    
+    if system == "darwin":  # macOS
+        base_path = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+    elif system == "linux":
+        base_path = os.path.expanduser("~/.config/google-chrome")
+    elif system == "windows":
+        base_path = os.path.join(os.getenv('LOCALAPPDATA', ''), "Google", "Chrome", "User Data")
+    else:
+        logger.warning(f"Unsupported operating system: {system}")
+        return None
+    
+    if not os.path.exists(base_path):
+        logger.warning(f"Chrome profiles directory not found at: {base_path}")
+        return None
+    
+    # Chrome typically uses "Default" as the main profile directory
+    profile_path = os.path.join(base_path, "Default")
+    if os.path.exists(profile_path):
+        logger.info(f"Found Chrome profile: {profile_path}")
+        return profile_path
+    
+    logger.warning(f"Chrome Default profile not found in: {base_path}")
+    return None
 
-# Chrome history path for macOS - need to verify this is correct
-# CHROME_HISTORY_DIR = "/Users/eleanor.mazzarella/Library/Application Support/Google/Chrome/Default"
-# PATH_TO_CHROME_HISTORY = os.path.join(CHROME_HISTORY_DIR, "History")
+def get_chrome_history_path() -> Optional[str]:
+    """Get the path to Chrome history database"""
+    profile_path = get_chrome_profile_path()
+    if not profile_path:
+        return None
+    
+    history_path = os.path.join(profile_path, "History")
+    if os.path.exists(history_path):
+        return history_path
+    else:
+        logger.warning(f"Chrome history database not found at: {history_path}")
+        return None
+
+
+PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
+PATH_TO_CHROME_HISTORY = get_chrome_history_path()
 
 @dataclass(frozen=True)
 class HistoryEntry:
@@ -87,13 +124,18 @@ class AppContext:
     firefox_db: Optional[sqlite3.Connection]
     chrome_db: Optional[sqlite3.Connection]
 
-mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
+mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox or Chrome browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
 
 @mcp.prompt()
 def productivity_analysis() -> str:
     """Creates a comprehensive productivity analysis prompt"""
     return """
-    Analyze the browser history to provide actionable productivity insights:
+    Analyze the browser history to provide actionable productivity insights.
+    
+    First, determine which browser is currently active by checking database accessibility.
+    Inform the user which browser's data you're analyzing and why (e.g., "Analyzing Firefox data as it appears to be your active browser").
+    
+    Then provide:
     
     1. **Time Distribution Analysis**
        - Calculate percentage of time on work-related vs entertainment sites
@@ -245,78 +287,142 @@ def _get_firefox_history(days: int) -> List[HistoryEntry]:
         if conn:
             conn.close()
 
-# def _get_chrome_history(db: sqlite3.Connection, days: int) -> List[HistoryEntry]:
-#     """Get Chrome history from the last N days"""
-#     cursor = db.cursor()
+def _get_chrome_history(days: int) -> List[HistoryEntry]:
+    """Get Chrome history from the last N days"""
+    if not os.path.exists(PATH_TO_CHROME_HISTORY):
+        raise RuntimeError(f"Chrome history not found at {PATH_TO_CHROME_HISTORY}")
     
-#     # Chrome stores timestamps as microseconds since Windows epoch (1601-01-01)
-#     # Convert to Unix timestamp for comparison
-#     windows_epoch_start = datetime(1601, 1, 1)
-#     unix_epoch_start = datetime(1970, 1, 1)
-#     epoch_diff = (unix_epoch_start - windows_epoch_start).total_seconds() * 1_000_000
+    # Connect to the database
+    conn = sqlite3.connect(f"file:{PATH_TO_CHROME_HISTORY}?mode=ro", uri=True)
+
+    try: 
+        cursor = conn.cursor()
     
-#     cutoff_time = (datetime.now() - timedelta(days=days)).timestamp() * 1_000_000 + epoch_diff
+        # Chrome stores timestamps as microseconds since Windows epoch (1601-01-01)
+        # Convert to Unix timestamp for comparison
+        windows_epoch_start = datetime(1601, 1, 1)
+        unix_epoch_start = datetime(1970, 1, 1)
+        epoch_diff = (unix_epoch_start - windows_epoch_start).total_seconds() * 1_000_000
     
-#     query = """
-#     SELECT DISTINCT u.url, u.title, u.visit_count, u.last_visit_time
-#     FROM urls u
-#     WHERE u.last_visit_time > ?
-#     AND u.hidden = 0
-#     ORDER BY u.last_visit_time DESC
-#     """
-    
-#     cursor.execute(query, (cutoff_time,))
-#     results = cursor.fetchall()
-    
-#     entries = []
-#     for url, title, visit_count, last_visit_time in results:
-#         # Convert Chrome timestamp to datetime
-#         visit_time = datetime.fromtimestamp((last_visit_time - epoch_diff) / 1_000_000)
+        cutoff_time = (datetime.now() - timedelta(days=days)).timestamp() * 1_000_000 + epoch_diff
         
-#         entries.append(HistoryEntry(
-#             url=url or "",
-#             title=title or "No Title", 
-#             visit_count=visit_count or 0,
-#             last_visit_time=visit_time
-#         ))
-    
-#     return entries
+        query = """
+        SELECT DISTINCT u.url, u.title, u.visit_count, u.last_visit_time
+        FROM urls u
+        WHERE u.last_visit_time > ?
+        AND u.hidden = 0
+        ORDER BY u.last_visit_time DESC
+        """
+        
+        cursor.execute(query, (cutoff_time,))
+        results = cursor.fetchall()
+        
+        entries = []
+        for url, title, visit_count, last_visit_time in results:
+            # Convert Chrome timestamp to datetime
+            visit_time = datetime.fromtimestamp((last_visit_time - epoch_diff) / 1_000_000)
+            
+            entries.append(HistoryEntry(
+                url=url or "",
+                title=title or "No Title", 
+                visit_count=visit_count or 0,
+                last_visit_time=visit_time
+            ))
+        
+        return entries
+    except Exception as e:
+        logger.error(f"Error querying Chrome history: {e}")
+        raise RuntimeError(f"Failed to query Chrome history: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 @mcp.tool()
-async def get_browser_history(time_period_in_days: int, browser_type: str = "firefox") -> List[Dict]:
-    """Get browser history from Firefox for the specified time period in days.
+def detect_active_browser() -> Optional[List[str]]:
+    """Detects which browser is currently active by attempting to connect to databases.
+    Returns 'firefox', 'chrome', or None if neither is accessible.
+    Once we know which browser is active, we must tell the user that they will need to close the browser to get the history.
+    Please remind them that they can restore their tabs by opening the browser again and possibly using Ctrl+Shift+T.
+    """
+    
+    browsers_to_check = []
+    
+    # Check Firefox
+    if PATH_TO_FIREFOX_HISTORY:
+        browsers_to_check.append(('firefox', PATH_TO_FIREFOX_HISTORY))
+    
+    # Check Chrome
+    if PATH_TO_CHROME_HISTORY:
+        browsers_to_check.append(('chrome', PATH_TO_CHROME_HISTORY))
+    
+    if not browsers_to_check:
+        logger.warning("No browser history databases found")
+        return None
+    
+    browsers_in_use = []
+    for browser_name, db_path in browsers_to_check:
+        try:
+            # Try to connect with read-only mode
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.close()
+            logger.info(f"Successfully connected to {browser_name} database - browser is likely closed")
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower():
+                logger.info(f"Database locked for {browser_name} - browser is likely open and active")
+                browsers_in_use.append(browser_name)
+            else:
+                logger.warning(f"Error connecting to {browser_name} database: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error connecting to {browser_name} database: {e}")
+    
+    # If no browser is locked, return both
+    if browsers_to_check:
+        logger.info(f"No active browser detected, defaulting to both Firefox and Chrome")
+        return ["firefox", "chrome"] # TODO: make this dynamic based on the browsers_to_check list
+    
+    return browsers_in_use
+
+
+@mcp.tool()
+async def get_browser_history(time_period_in_days: int, browser_type: Optional[str] = None) -> List[Dict]:
+    """Get browser history from the specified browser for the given time period.
     
     Args:
         time_period_in_days: Number of days of history to retrieve
-        browser_type: Browser type (currently only 'firefox' is supported)
+        browser_type: Browser type ('firefox', 'chrome', or None for auto-detect)
+
+    
     """
     
     if time_period_in_days <= 0:
         raise ValueError("time_period_in_days must be a positive integer")
     
-    if browser_type == "firefox":
-        try:
-            entries = _get_firefox_history(time_period_in_days)
-            logger.info(f"Retrieved {len(entries)} Firefox history entries from last {time_period_in_days} days")
-            return [entry.to_dict() for entry in entries]
-        except sqlite3.Error as e:
-            logger.error(f"Error querying Firefox history: {e}")
-            raise RuntimeError(f"Failed to query Firefox history: {e}")
-            
-    # elif browser_type == BrowserType.CHROME:
-    #     if not context.chrome_db:
-    #         raise RuntimeError("Chrome database not available")
-            
-    #     try:
-    #         entries = _get_chrome_history(context.chrome_db, time_period_in_days)
-    #         logger.info(f"Retrieved {len(entries)} Chrome history entries from last {time_period_in_days} days")
-    #         return [entry.to_dict() for entry in entries]
-    #     except sqlite3.Error as e:
-    #         logger.error(f"Error querying Chrome history: {e}")
-    #         raise RuntimeError(f"Failed to query Chrome history: {e}")
+    # Auto-detect browser if not specified
+    if browser_type is None:
+        browser_type = detect_active_browser()
+        if browser_type is None:
+            raise RuntimeError("This MCP currently only supports Firefox and Chrome. Please ensure Firefox or Chrome is installed and try again.")
+        logger.info(f"Auto-detected active browser: {browser_type}")
     
-    # else:
-    #     raise ValueError(f"Unsupported browser type: {browser_type}")
+    # Map browser types to their handler functions
+    browser_handlers = {
+        "firefox": _get_firefox_history,
+        "chrome": _get_chrome_history
+    }
+    
+    if browser_type not in browser_handlers:
+        raise ValueError(f"Unsupported browser type: {browser_type}. Supported types: {list(browser_handlers.keys())}")
+    
+    try:
+        entries = browser_handlers[browser_type](time_period_in_days)
+        logger.info(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
+        return [entry.to_dict() for entry in entries]
+    except sqlite3.Error as e:
+        logger.error(f"Error querying {browser_type} history: {e}")
+        raise RuntimeError(f"Failed to query {browser_type} history: {e}. Try closing the browser - history is locked while the browser is running.")
+    except Exception as e:
+        logger.error(f"Unexpected error querying {browser_type} history: {e}")
+        raise RuntimeError(f"Failed to query {browser_type} history: {e}")
 
 @mcp.tool()
 async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:

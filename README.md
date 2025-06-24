@@ -1,10 +1,10 @@
 # Browser History MCP Server
 
-A Model Context Protocol (MCP) server that provides access to browser history data for analysis and insights.
+A Model Context Protocol (MCP) server that provides access to browser history data for analysis and insights. Built using the official [python mcp sdk](https://github.com/modelcontextprotocol/python-sdk) and intended for local integration with Claude Desktop, for personal use. 
 
 ## Features
 
-- Query Firefox browser history
+- Query Firefox and/or Chrome browser history
 - Group browsing sessions
 - Categorize websites by type
 - Analyze domain frequency
@@ -15,7 +15,7 @@ A Model Context Protocol (MCP) server that provides access to browser history da
 
 ### Automatic Setup (Recommended)
 
-The server automatically detects your Firefox profile directory based on your operating system:
+The server automatically detects your Firefox and Chrome profile directories based on your operating system:
 
 - **macOS**: `~/Library/Application Support/Firefox/Profiles/[profile-id].default-release`
 - **Linux**: `~/.mozilla/firefox/[profile-id].default-release`
@@ -43,7 +43,7 @@ Then install the project dependencies:
 ```bash
 uv sync
 ```
-
+ 
 This will create a virtual environment and install all dependencies from `pyproject.toml`.
 
 Alternatively, if you prefer using pip:
@@ -52,27 +52,23 @@ Alternatively, if you prefer using pip:
 pip install -e .
 ```
 
-### Run the Server
-```bash
-python server.py
-```
-
-### Debug
+### Debug Locally
 ```bash
 uv run mcp dev server.py
 ```
+_Tip: Select the local url that allows you to open the inspector with the token pre-filled._
 
-## Security Notes
-
-- Never commit your actual browser profile paths to version control
-- Browser history databases contain sensitive information - handle with care
-- The server automatically finds your profile, so no manual path configuration is needed
+### Install the MCP for use in Claude Desktop
+```bash
+uv run mcp install server.py --name "Browser History MCP"
+```
 
 ## Usage
 
 The server provides several tools for analyzing browser history:
 
 - `get_browser_history`: Retrieve history entries for a time period
+- `detect_active_browser`: Tries to guess your preferred browser by seeing which one is currently active.  
 - `group_browsing_history_into_sessions`: Group visits into sessions
 - `categorize_browsing_history`: Categorize websites by type
 - `analyze_domain_frequency`: Find most visited domains
