@@ -1,23 +1,66 @@
 import sqlite3
 import os
-import enum
-from contextlib import asynccontextmanager
+import platform
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-from typing import AsyncIterator, Dict, List, Optional
-from mcp.server.fastmcp import FastMCP, Context
-import asyncio
+from typing import Dict, List, Optional
+from mcp.server.fastmcp import FastMCP
 from urllib.parse import urlparse
 from collections import Counter, defaultdict
 import re
 from functools import lru_cache
+import glob
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("browser-storage-mcp")
 
-FIREFOX_PROFILE_DIR = "/Users/eleanor.mazzarella/Library/Application Support/Firefox/Profiles/l42msng6.default-release"
-PATH_TO_FIREFOX_HISTORY = os.path.join(FIREFOX_PROFILE_DIR, "places.sqlite")
+def get_firefox_profile_path() -> Optional[str]:
+    """Automatically detect Firefox profile directory based on OS"""
+    system = platform.system().lower()
+    
+    if system == "darwin":  # macOS
+        base_path = os.path.expanduser("~/Library/Application Support/Firefox/Profiles")
+    elif system == "linux":
+        base_path = os.path.expanduser("~/.mozilla/firefox")
+    elif system == "windows":
+        base_path = os.path.join(os.getenv('APPDATA', ''), "Mozilla", "Firefox", "Profiles")
+    else:
+        logger.warning(f"Unsupported operating system: {system}")
+        return None
+    
+    if not os.path.exists(base_path):
+        logger.warning(f"Firefox profiles directory not found at: {base_path}")
+        return None
+    
+    # Look for default profile directories
+    profile_patterns = ["*.default-release", "*.default"]
+    for pattern in profile_patterns:
+        matches = glob.glob(os.path.join(base_path, pattern))
+        if matches:
+            # Return the first match (usually there's only one default profile)
+            profile_path = matches[0]
+            logger.info(f"Found Firefox profile: {profile_path}")
+            return profile_path
+    
+    logger.warning(f"No default Firefox profile found in: {base_path}")
+    return None
+
+def get_firefox_history_path() -> Optional[str]:
+    """Get the path to Firefox history database"""
+    profile_path = get_firefox_profile_path()
+    if not profile_path:
+        return None
+    
+    history_path = os.path.join(profile_path, "places.sqlite")
+    if os.path.exists(history_path):
+        return history_path
+    else:
+        logger.warning(f"Firefox history database not found at: {history_path}")
+        return None
+
+# Get Firefox paths automatically
+PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
 
 # Chrome history path for macOS - need to verify this is correct
 # CHROME_HISTORY_DIR = "/Users/eleanor.mazzarella/Library/Application Support/Google/Chrome/Default"
