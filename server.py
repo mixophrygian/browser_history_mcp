@@ -99,9 +99,68 @@ def get_chrome_history_path() -> Optional[str]:
         logger.warning(f"Chrome history database not found at: {history_path}")
         return None
 
+def get_safari_profile_path() -> Optional[str]:
+    """Automatically detect Safari profile directory based on OS"""
+    system = platform.system().lower()
+    
+    if system == "darwin":  # macOS
+        # Safari stores its data in the WebKit directory
+        base_path = os.path.expanduser("~/Library/WebKit/com.apple.Safari")
+        
+        # Also check the traditional Safari location as fallback
+        if not os.path.exists(base_path):
+            base_path = os.path.expanduser("~/Library/Safari")
+    else:
+        logger.warning(f"Safari is only supported on macOS, not {system}")
+        return None
+    
+    if not os.path.exists(base_path):
+        logger.warning(f"Safari profiles directory not found at: {base_path}")
+        return None
+    
+    logger.info(f"Found Safari profile: {base_path}")
+    return base_path
+
+def get_safari_history_path() -> Optional[str]:
+    """Get the path to Safari history database"""
+    profile_path = get_safari_profile_path()
+    if not profile_path:
+        return None
+    
+    # Modern Safari (macOS 10.15+) uses different storage mechanisms
+    # Try different possible Safari database locations and names
+    possible_paths = [
+        # Traditional locations (older Safari versions)
+        os.path.join(profile_path, "History.db"),
+        os.path.join(profile_path, "WebpageIcons.db"),
+        os.path.join(profile_path, "Databases.db"),
+        
+        # Modern WebKit locations
+        os.path.join(profile_path, "WebsiteData", "LocalStorage"),
+        os.path.join(profile_path, "WebsiteData", "IndexedDB"),
+        os.path.join(profile_path, "WebsiteData", "ResourceLoadStatistics"),
+        
+        # Alternative locations for modern Safari
+        os.path.join(os.path.expanduser("~/Library/Safari"), "History.db"),
+        os.path.join(os.path.expanduser("~/Library/Safari"), "WebpageIcons.db"),
+        
+        # CloudKit-related locations
+        os.path.join(os.path.expanduser("~/Library/Application Support/CloudDocs/session/containers/iCloud.com.apple.Safari"), "Documents"),
+    ]
+    
+    for history_path in possible_paths:
+        if os.path.exists(history_path):
+            logger.info(f"Found Safari database at: {history_path}")
+            return history_path
+    
+    logger.warning(f"No Safari history database found in: {profile_path}")
+    logger.warning("Modern Safari (macOS 10.15+) uses CloudKit for history syncing and has limited programmatic access")
+    return None
+
 
 PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
 PATH_TO_CHROME_HISTORY = get_chrome_history_path()
+PATH_TO_SAFARI_HISTORY = get_safari_history_path()
 
 @dataclass(frozen=True)
 class HistoryEntry:
@@ -123,8 +182,9 @@ class HistoryEntry:
 class AppContext:
     firefox_db: Optional[sqlite3.Connection]
     chrome_db: Optional[sqlite3.Connection]
+    safari_db: Optional[sqlite3.Connection]
 
-mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox or Chrome browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
+mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox, Chrome, or Safari browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
 
 @mcp.prompt()
 def productivity_analysis() -> str:
@@ -337,10 +397,107 @@ def _get_chrome_history(days: int) -> List[HistoryEntry]:
         if conn:
             conn.close()
 
+def _get_safari_history(days: int) -> List[HistoryEntry]:
+    """Get Safari history from the last N days"""
+    if not os.path.exists(PATH_TO_SAFARI_HISTORY):
+        raise RuntimeError(f"Safari history not found at {PATH_TO_SAFARI_HISTORY}")
+    
+    # Connect to the database
+    try:
+        conn = sqlite3.connect(f"file:{PATH_TO_SAFARI_HISTORY}?mode=ro", uri=True)
+    except sqlite3.OperationalError as e:
+        if "unable to open database file" in str(e).lower():
+            raise RuntimeError(
+                f"Cannot access Safari database: {e}. "
+                "Modern Safari (macOS 10.15+) uses CloudKit for history syncing and has limited programmatic access. "
+                "Consider using Firefox or Chrome for browser history analysis, or export Safari history manually through Safari's interface."
+            )
+        else:
+            raise RuntimeError(f"Failed to connect to Safari database: {e}")
+    
+    try: 
+        cursor = conn.cursor()
+        
+        # First, let's see what tables are available
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [row[0] for row in cursor.fetchall()]
+        logger.info(f"Available tables in Safari database: {tables}")
+        
+        # Safari stores timestamps as seconds since Unix epoch
+        cutoff_time = (datetime.now() - timedelta(days=days)).timestamp()
+        
+        # Try different possible Safari database structures
+        query = None
+        
+        # Check if we have the traditional history tables
+        if 'history_items' in tables and 'history_visits' in tables:
+            query = """
+            SELECT DISTINCT hi.url, hi.title, COUNT(hv.id) as visit_count, MAX(hv.visit_time) as last_visit_time
+            FROM history_items hi
+            JOIN history_visits hv ON hi.id = hv.history_item
+            WHERE hv.visit_time > ?
+            GROUP BY hi.id, hi.url, hi.title
+            ORDER BY last_visit_time DESC
+            """
+        elif 'urls' in tables:
+            # Fallback to Chrome-like structure
+            query = """
+            SELECT DISTINCT u.url, u.title, u.visit_count, u.last_visit_time
+            FROM urls u
+            WHERE u.last_visit_time > ?
+            ORDER BY u.last_visit_time DESC
+            """
+        elif 'moz_places' in tables:
+            # Fallback to Firefox-like structure
+            query = """
+            SELECT DISTINCT h.url, h.title, h.visit_count, h.last_visit_date
+            FROM moz_places h
+            WHERE h.last_visit_date > ? 
+            AND h.hidden = 0
+            ORDER BY h.last_visit_date DESC
+            """
+        
+        if query is None:
+            raise RuntimeError(
+                f"Safari database structure not recognized. Available tables: {tables}. "
+                "Modern Safari uses CloudKit for history syncing and has limited programmatic access. "
+                "Consider using Firefox or Chrome for browser history analysis."
+            )
+        
+        cursor.execute(query, (cutoff_time,))
+        results = cursor.fetchall()
+        
+        entries = []
+        for url, title, visit_count, last_visit_time in results:
+            # Convert Safari timestamp (seconds) to datetime
+            visit_time = datetime.fromtimestamp(last_visit_time)
+            
+            entries.append(HistoryEntry(
+                url=url or "",
+                title=title or "No Title", 
+                visit_count=visit_count or 0,
+                last_visit_time=visit_time
+            ))
+        
+        return entries
+    except Exception as e:
+        logger.error(f"Error querying Safari history: {e}")
+        if "no such table" in str(e).lower():
+            raise RuntimeError(
+                f"Safari database structure not supported: {e}. "
+                "Modern Safari uses CloudKit for history syncing and has limited programmatic access. "
+                "Consider using Firefox or Chrome for browser history analysis."
+            )
+        else:
+            raise RuntimeError(f"Failed to query Safari history: {e}")
+    finally:
+        if conn:
+            conn.close()
+
 @mcp.tool()
 def detect_active_browser() -> Optional[List[str]]:
     """Detects which browser is currently active by attempting to connect to databases.
-    Returns 'firefox', 'chrome', or None if neither is accessible.
+    Returns 'firefox', 'chrome', 'safari', or None if none are accessible.
     Once we know which browser is active, we must tell the user that they will need to close the browser to get the history.
     Please remind them that they can restore their tabs by opening the browser again and possibly using Ctrl+Shift+T.
     """
@@ -354,6 +511,10 @@ def detect_active_browser() -> Optional[List[str]]:
     # Check Chrome
     if PATH_TO_CHROME_HISTORY:
         browsers_to_check.append(('chrome', PATH_TO_CHROME_HISTORY))
+    
+    # Check Safari
+    if PATH_TO_SAFARI_HISTORY:
+        browsers_to_check.append(('safari', PATH_TO_SAFARI_HISTORY))
     
     if not browsers_to_check:
         logger.warning("No browser history databases found")
@@ -375,54 +536,89 @@ def detect_active_browser() -> Optional[List[str]]:
         except Exception as e:
             logger.warning(f"Unexpected error connecting to {browser_name} database: {e}")
     
-    # If no browser is locked, return both
-    if browsers_to_check:
-        logger.info(f"No active browser detected, defaulting to both Firefox and Chrome")
-        return ["firefox", "chrome"] # TODO: make this dynamic based on the browsers_to_check list
+    # If no browser is locked, return all available browsers
+    if not browsers_in_use and browsers_to_check:
+        available_browsers = [browser[0] for browser in browsers_to_check]
+        logger.info(f"No active browser detected, available browsers: {available_browsers}")
+        return available_browsers
     
     return browsers_in_use
 
 
 @mcp.tool()
-async def get_browser_history(time_period_in_days: int, browser_type: Optional[str] = None) -> List[Dict]:
-    """Get browser history from the specified browser for the given time period.
+async def get_browser_history(time_period_in_days: int, browser_type: Optional[str] = None, all_browsers: bool = False) -> List[Dict]:
+    """Get browser history from the specified browser(s) for the given time period.
     
     Args:
         time_period_in_days: Number of days of history to retrieve
-        browser_type: Browser type ('firefox', 'chrome', or None for auto-detect)
-
-    
+        browser_type: Browser type ('firefox', 'chrome', 'safari', or None for auto-detect)
+        all_browsers: If True, get history from all available browsers. If False, use browser_type or auto-detect.
     """
     
     if time_period_in_days <= 0:
         raise ValueError("time_period_in_days must be a positive integer")
     
-    # Auto-detect browser if not specified
-    if browser_type is None:
-        browser_type = detect_active_browser()
-        if browser_type is None:
-            raise RuntimeError("This MCP currently only supports Firefox and Chrome. Please ensure Firefox or Chrome is installed and try again.")
-        logger.info(f"Auto-detected active browser: {browser_type}")
-    
     # Map browser types to their handler functions
     browser_handlers = {
         "firefox": _get_firefox_history,
-        "chrome": _get_chrome_history
+        "chrome": _get_chrome_history,
+        "safari": _get_safari_history
     }
     
-    if browser_type not in browser_handlers:
-        raise ValueError(f"Unsupported browser type: {browser_type}. Supported types: {list(browser_handlers.keys())}")
+    if all_browsers:
+        # Get history from all available browsers
+        all_entries = []
+        available_browsers = detect_active_browser()
+        
+        if not available_browsers:
+            raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
+        
+        for browser in available_browsers:
+            try:
+                entries = browser_handlers[browser](time_period_in_days)
+                logger.info(f"Retrieved {len(entries)} {browser} history entries from last {time_period_in_days} days")
+                all_entries.extend([entry.to_dict() for entry in entries])
+            except Exception as e:
+                logger.warning(f"Failed to get {browser} history: {e}")
+                continue
+        
+        if not all_entries:
+            raise RuntimeError("Failed to retrieve history from any browser. Try closing browsers - history is locked while browsers are running.")
+        
+        logger.info(f"Retrieved total of {len(all_entries)} history entries from all browsers")
+        return all_entries
     
-    try:
-        entries = browser_handlers[browser_type](time_period_in_days)
-        logger.info(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
-        return [entry.to_dict() for entry in entries]
-    except sqlite3.Error as e:
-        logger.error(f"Error querying {browser_type} history: {e}")
-        raise RuntimeError(f"Failed to query {browser_type} history: {e}. Try closing the browser - history is locked while the browser is running.")
-    except Exception as e:
-        logger.error(f"Unexpected error querying {browser_type} history: {e}")
-        raise RuntimeError(f"Failed to query {browser_type} history: {e}")
+    else:
+        # Single browser mode (original behavior)
+        if browser_type is None:
+            detected_browsers = detect_active_browser()
+            if detected_browsers is None:
+                raise RuntimeError("This MCP currently only supports Firefox, Chrome, and Safari. Please ensure one of these browsers is installed and try again.")
+            
+            # If detect_active_browser returns a list, take the first available browser
+            if isinstance(detected_browsers, list):
+                browser_type = detected_browsers[0] if detected_browsers else None
+            else:
+                browser_type = detected_browsers
+                
+            if browser_type is None:
+                raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
+                
+            logger.info(f"Auto-detected active browser: {browser_type}")
+        
+        if browser_type not in browser_handlers:
+            raise ValueError(f"Unsupported browser type: {browser_type}. Supported types: {list(browser_handlers.keys())}")
+        
+        try:
+            entries = browser_handlers[browser_type](time_period_in_days)
+            logger.info(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
+            return [entry.to_dict() for entry in entries]
+        except sqlite3.Error as e:
+            logger.error(f"Error querying {browser_type} history: {e}")
+            raise RuntimeError(f"Failed to query {browser_type} history: {e}. Try closing the browser - history is locked while the browser is running.")
+        except Exception as e:
+            logger.error(f"Unexpected error querying {browser_type} history: {e}")
+            raise RuntimeError(f"Failed to query {browser_type} history: {e}")
 
 @mcp.tool()
 async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
@@ -680,6 +876,50 @@ async def calculate_productivity_metrics(categorized_data: Dict[str, Dict]) -> D
             metrics['top_distraction_sites'].extend(domains.most_common(3))
     
     return metrics
+
+def check_safari_accessibility() -> Dict[str, any]:
+    """Check Safari accessibility and provide diagnostics"""
+    result = {
+        "safari_installed": os.path.exists("/Applications/Safari.app"),
+        "profile_path": get_safari_profile_path(),
+        "history_path": PATH_TO_SAFARI_HISTORY,
+        "accessible": False,
+        "error": None,
+        "limitations": "Modern Safari (macOS 10.15+) uses CloudKit for history syncing and has limited programmatic access"
+    }
+    
+    if not result["safari_installed"]:
+        result["error"] = "Safari is not installed"
+        return result
+    
+    if not result["history_path"]:
+        result["error"] = "Safari history database not found"
+        result["recommendation"] = "Consider using Firefox or Chrome for browser history analysis, or export Safari history manually through Safari's interface"
+        return result
+    
+    try:
+        # Try to connect to the database
+        conn = sqlite3.connect(f"file:{result['history_path']}?mode=ro", uri=True)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        result["accessible"] = True
+        result["tables"] = tables
+        result["message"] = f"Safari database accessible with {len(tables)} tables"
+        result["note"] = "This may be limited data - modern Safari uses CloudKit for full history syncing"
+    except Exception as e:
+        result["error"] = str(e)
+        result["message"] = "Safari database not accessible"
+        result["recommendation"] = "Modern Safari has limited programmatic access. Consider using Firefox or Chrome for browser history analysis"
+    
+    return result
+
+@mcp.tool()
+def diagnose_safari_support() -> Dict[str, any]:
+    """Diagnose Safari support and accessibility. Useful for debugging Safari integration."""
+    return check_safari_accessibility()
 
 if __name__ == "__main__":
     mcp.run()
