@@ -495,9 +495,12 @@ def _get_safari_history(days: int) -> List[HistoryEntry]:
             conn.close()
 
 @mcp.tool()
-def detect_active_browser() -> Optional[List[str]]:
+def detect_active_browser() -> Dict[str, Any]:
     """Detects which browser is currently active by attempting to connect to databases.
-    Returns 'firefox', 'chrome', 'safari', or None if none are accessible.
+    Returns a dictionary with the following keys:
+    - available_browsers: List of browser names that are available
+    - active_browsers: List of browser names that are currently running
+    - recommended_action: A message to the user about what to do to get the history
     Once we know which browser is active, we must tell the user that they will need to close the browser to get the history.
     Please remind them that they can restore their tabs by opening the browser again and possibly using Ctrl+Shift+T.
     """
@@ -542,7 +545,11 @@ def detect_active_browser() -> Optional[List[str]]:
         logger.info(f"No active browser detected, available browsers: {available_browsers}")
         return available_browsers
     
-    return browsers_in_use
+    return {
+        "available_browsers": [browser[0] for browser in browsers_to_check],
+        "active_browsers": browsers_in_use,  # Currently running
+        "recommended_action": "Please close the browser to analyze its history. You can restore tabs with Ctrl+Shift+T"
+    }
 
 
 @mcp.tool()
@@ -620,7 +627,6 @@ async def get_browser_history(time_period_in_days: int, browser_type: Optional[s
             logger.error(f"Unexpected error querying {browser_type} history: {e}")
             raise RuntimeError(f"Failed to query {browser_type} history: {e}")
 
-@mcp.tool()
 async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
     """Group browser history into sessions based on time gaps.
     
@@ -680,8 +686,6 @@ async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap
 
 
 
-@mcp.tool()
-@lru_cache(maxsize=1000)
 async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, List[Dict]]:
     """Categorize URLs into meaningful groups.
     
@@ -730,8 +734,6 @@ async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, Lis
     
     return result
 
-@mcp.tool()
-@lru_cache(maxsize=1000)
 async def analyze_domain_frequency(history_data: List[Dict], top_n: int = 20) -> List[Dict]:
     """Analyze most frequently visited domains.
     
@@ -765,7 +767,6 @@ async def analyze_domain_frequency(history_data: List[Dict], top_n: int = 20) ->
     
     return domain_list[:top_n]
 
-@mcp.tool()
 async def find_learning_paths(history_data: List[Dict]) -> List[Dict]:
     """Identify learning progressions in browsing history.
     
@@ -835,7 +836,6 @@ async def find_learning_paths(history_data: List[Dict]) -> List[Dict]:
     
     return learning_sessions
 
-@mcp.tool()
 async def calculate_productivity_metrics(categorized_data: Dict[str, Dict]) -> Dict:
     """Calculate productivity metrics from categorized browsing data.
     
@@ -920,6 +920,28 @@ def check_safari_accessibility() -> Dict[str, Any]:
 def diagnose_safari_support() -> Dict[str, Any]:
     """Diagnose Safari support and accessibility. Useful for debugging Safari integration."""
     return check_safari_accessibility()
+
+
+@mcp.tool()
+def analyze_browsing_history(history_data: List[Dict], analysis_types: List[str] = ["sessions", "categories", "domains", "learning_paths", "productivity"]) -> Dict[str, Any]:
+    """Analyze browsing history based on selected analysis types.
+    
+    Args:
+        history_data: List of history entries from get_browser_history
+        analysis_types: List of analysis types to perform
+    """
+    browsing_sessions = group_browsing_history_into_sessions(history_data)
+    categorized_data = categorize_browsing_history(history_data)
+    domain_stats = analyze_domain_frequency(history_data)
+    learning_paths = find_learning_paths(history_data)
+    productivity_metrics = calculate_productivity_metrics(categorized_data)
+    return {
+        "browsing_sessions": browsing_sessions,
+        "categorized_data": categorized_data,
+        "domain_stats": domain_stats,
+        "learning_paths": learning_paths,
+        "productivity_metrics": productivity_metrics
+    }
 
 if __name__ == "__main__":
     mcp.run()
