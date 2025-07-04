@@ -4,7 +4,7 @@ import platform
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from mcp.server.fastmcp import FastMCP
 from urllib.parse import urlparse
 from collections import Counter, defaultdict
@@ -877,7 +877,7 @@ async def calculate_productivity_metrics(categorized_data: Dict[str, Dict]) -> D
     
     return metrics
 
-def check_safari_accessibility() -> Dict[str, any]:
+def check_safari_accessibility() -> Dict[str, Any]:
     """Check Safari accessibility and provide diagnostics"""
     result = {
         "safari_installed": os.path.exists("/Applications/Safari.app"),
@@ -917,7 +917,7 @@ def check_safari_accessibility() -> Dict[str, any]:
     return result
 
 @mcp.tool()
-def diagnose_safari_support() -> Dict[str, any]:
+def diagnose_safari_support() -> Dict[str, Any]:
     """Diagnose Safari support and accessibility. Useful for debugging Safari integration."""
     return check_safari_accessibility()
 
