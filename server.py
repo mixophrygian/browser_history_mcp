@@ -191,10 +191,9 @@ def productivity_analysis() -> str:
     """Creates a comprehensive productivity analysis prompt"""
     return """
     Analyze the browser history to provide actionable productivity insights.
-    
-    First, determine which browser is currently active by checking database accessibility.
-    Inform the user which browser's data you're analyzing and why (e.g., "Analyzing Firefox data as it appears to be your active browser").
-    
+
+    The MCP tool @get_browsing_insights will be used to get the browser history and insights.
+        
     Then provide:
     
     1. **Time Distribution Analysis**
@@ -552,7 +551,6 @@ def detect_active_browser() -> Dict[str, Any]:
     }
 
 
-@mcp.tool()
 async def get_browser_history(time_period_in_days: int, browser_type: Optional[str] = None, all_browsers: bool = False) -> List[Dict]:
     """Get browser history from the specified browser(s) for the given time period.
     
@@ -627,7 +625,7 @@ async def get_browser_history(time_period_in_days: int, browser_type: Optional[s
             logger.error(f"Unexpected error querying {browser_type} history: {e}")
             raise RuntimeError(f"Failed to query {browser_type} history: {e}")
 
-async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
+async def oroup_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
     """Group browser history into sessions based on time gaps.
     
     Args:
@@ -684,7 +682,38 @@ async def group_browsing_history_into_sessions(history_data: List[Dict], max_gap
     logger.info(f"Grouped {len(history_data)} entries into {len(sessions)} sessions")
     return sessions
 
-
+async def analyze_time_patterns(history_data: List[Dict]) -> Dict[str, Any]:
+    """Analyzes WHEN browsing happens, not just session continuity."""
+    
+    patterns = {
+        "hourly_distribution": defaultdict(int),  # 0-23 hours
+        "day_of_week": defaultdict(int),  # Mon-Sun
+        "productivity_by_hour": {},  # Productive vs distraction sites by hour
+        "session_patterns": {
+            "morning_routine": [],  # First sites visited 6-9am
+            "lunch_break": [],      # 11:30-13:00 patterns
+            "evening_wind_down": [] # After 21:00
+        },
+        "habit_analysis": {
+            "daily_checks": [],  # Sites visited same time daily
+            "monday_morning": [],  # Weekly patterns
+            "weekend_different": {}  # How weekends differ
+        }
+    }
+    
+    # This is different from sessions - it's about TIME patterns
+    for entry in history_data:
+        visit_time = datetime.fromisoformat(entry['last_visit_time'])
+        hour = visit_time.hour
+        dow = visit_time.strftime('%A')
+        
+        patterns["hourly_distribution"][hour] += 1
+        patterns["day_of_week"][dow] += 1
+        
+        # Identify habitual visits (same site, same hour, multiple days)
+        # ... more analysis
+    
+    return patterns
 
 async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, List[Dict]]:
     """Categorize URLs into meaningful groups.
@@ -923,25 +952,59 @@ def diagnose_safari_support() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def analyze_browsing_history(history_data: List[Dict], analysis_types: List[str] = ["sessions", "categories", "domains", "learning_paths", "productivity"]) -> Dict[str, Any]:
+async def get_browsing_insights(time_period_in_days: int = 7, analysis_types: List[str] = ["sessions", "categories", "domains", "learning_paths", "productivity"]) -> Dict[str, Any]:
     """Analyze browsing history based on selected analysis types.
+    This tool will get the browser history from the specified browser(s) for the given time period.
+    It will then group the history into sessions, categorize the history, analyze the domains, find learning paths, and calculate productivity metrics.
+    It will return a dictionary with the following keys:
+    - browsing_sessions: List of browsing sessions
+    - categorized_data: Categorized browsing data
+    - domain_stats: Domain statistics
+    - learning_paths: Learning paths
+    - productivity_metrics: Productivity metrics
     
     Args:
         history_data: List of history entries from get_browser_history
         analysis_types: List of analysis types to perform
     """
-    browsing_sessions = group_browsing_history_into_sessions(history_data)
-    categorized_data = categorize_browsing_history(history_data)
-    domain_stats = analyze_domain_frequency(history_data)
-    learning_paths = find_learning_paths(history_data)
-    productivity_metrics = calculate_productivity_metrics(categorized_data)
+    history = await get_browser_history(time_period_in_days, "", True)
+    browsing_sessions = await oroup_browsing_history_into_sessions(history)
+    time_patterns = await analyze_time_patterns(history)
+    categorized_data = await categorize_browsing_history(history)
+    domain_stats = await analyze_domain_frequency(history)
+    learning_paths = await find_learning_paths(history)
+    productivity_metrics = await calculate_productivity_metrics(categorized_data)
     return {
         "browsing_sessions": browsing_sessions,
+        "time_patterns": time_patterns,
         "categorized_data": categorized_data,
         "domain_stats": domain_stats,
         "learning_paths": learning_paths,
         "productivity_metrics": productivity_metrics
     }
 
+@mcp.tool()
+async def search_browser_history(
+    query: str,
+    browser_history: List[Dict],
+) -> List[Dict]:
+    """This tool can only be used after the tool @get_browser_history has been used to get the browser history.
+    It will search the browser history for the query and return the results.
+    """     
+    query_lower = query.lower()
+    results = []
+    
+    for entry in browser_history:
+        url = entry.get('url', '')
+        title = entry.get('title', '')
+        
+        # Handle None values safely
+        if (isinstance(url, str) and query_lower in url.lower()) or \
+           (isinstance(title, str) and query_lower in title.lower()):
+            results.append(entry)
+    
+    return results
+
+        
 if __name__ == "__main__":
     mcp.run()
