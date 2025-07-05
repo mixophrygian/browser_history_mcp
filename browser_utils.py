@@ -459,8 +459,12 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
     if all_browsers:
         # Get history from all available browsers
         all_entries = []
-        available_browsers = tool_detect_active_browser()
+        browser_status = tool_detect_active_browser()
         
+        if not browser_status:
+            raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
+        
+        available_browsers = browser_status.get('available_browsers', [])
         if not available_browsers:
             raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
         
@@ -482,15 +486,13 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
     else:
         # Single browser mode (original behavior)
         if browser_type is None:
-            detected_browsers = tool_detect_active_browser()
-            if detected_browsers is None:
+            browser_status = tool_detect_active_browser()
+            if browser_status is None:
                 raise RuntimeError("This MCP currently only supports Firefox, Chrome, and Safari. Please ensure one of these browsers is installed and try again.")
             
-            # If detect_active_browser returns a list, take the first available browser
-            if isinstance(detected_browsers, list):
-                browser_type = detected_browsers[0] if detected_browsers else None
-            else:
-                browser_type = detected_browsers
+            # Get the first available browser from the available_browsers list
+            available_browsers = browser_status.get('available_browsers', [])
+            browser_type = available_browsers[0] if available_browsers else None
                 
             if browser_type is None:
                 raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
@@ -538,7 +540,7 @@ async def tool_search_browser_history(query: str, CACHED_HISTORY: CachedHistory)
     
     return results
 
-async def tool_test_browser_access() -> Dict[str, Any]:
+def tool_test_browser_access() -> Dict[str, Any]:
     """Quick test to see what's accessible"""
     return {
         "firefox": PATH_TO_FIREFOX_HISTORY is not None,

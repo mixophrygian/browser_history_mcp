@@ -103,9 +103,9 @@ async def get_browsing_insights(time_period_in_days: int = 7) -> BrowserInsights
     return await tool_get_browsing_insights(time_period_in_days, CACHED_HISTORY)
 
 @mcp.tool()
-async def test_browser_access() -> Dict[str, Any]:
+def test_browser_access() -> Dict[str, Any]:
     """Quick test to see what's accessible"""
-    return await tool_test_browser_access()
+    return tool_test_browser_access()
 
 
 @mcp.tool()
