@@ -813,96 +813,6 @@ async def get_browser_history(time_period_in_days: int, browser_type: Optional[s
             logger.error(f"Unexpected error querying {browser_type} history: {e}")
             raise RuntimeError(f"Failed to query {browser_type} history: {e}")
 
-async def oroup_browsing_history_into_sessions(history_data: List[Dict], max_gap_hours: float = 2.0) -> List[Dict]:
-    """Group browser history into sessions based on time gaps.
-    
-    Args:
-        history_data: List of history entries from get_browser_history
-        max_gap_hours: Maximum hours between visits to consider same session
-    """
-    
-    if not history_data:
-        return []
-    
-    # Sort by timestamp
-    sorted_history = sorted(history_data, key=lambda x: x['last_visit_time'])
-    
-    sessions = []
-    current_session = []
-    
-    for entry in sorted_history:
-        visit_time = datetime.fromisoformat(entry['last_visit_time'])
-        
-        if not current_session:
-            # Start first session
-            current_session = [entry]
-        else:
-            # Check gap from last entry in current session
-            last_time = datetime.fromisoformat(current_session[-1]['last_visit_time'])
-            gap_hours = (visit_time - last_time).total_seconds() / 3600
-            
-            if gap_hours <= max_gap_hours:
-                # Continue current session
-                current_session.append(entry)
-            else:
-                # End current session and start new one
-                sessions.append({
-                    'session_start': current_session[0]['last_visit_time'],
-                    'session_end': current_session[-1]['last_visit_time'],
-                    'duration_minutes': (datetime.fromisoformat(current_session[-1]['last_visit_time']) - 
-                                       datetime.fromisoformat(current_session[0]['last_visit_time'])).total_seconds() / 60,
-                    'entry_count': len(current_session),
-                    'entries': current_session
-                })
-                current_session = [entry]
-    
-    # Don't forget the last session
-    if current_session:
-        sessions.append({
-            'session_start': current_session[0]['last_visit_time'],
-            'session_end': current_session[-1]['last_visit_time'],
-            'duration_minutes': (datetime.fromisoformat(current_session[-1]['last_visit_time']) - 
-                               datetime.fromisoformat(current_session[0]['last_visit_time'])).total_seconds() / 60,
-            'entry_count': len(current_session),
-            'entries': current_session
-        })
-    
-    logger.info(f"Grouped {len(history_data)} entries into {len(sessions)} sessions")
-    return sessions
-
-async def analyze_time_patterns(history_data: List[Dict]) -> Dict[str, Any]:
-    """Analyzes WHEN browsing happens, not just session continuity."""
-    
-    patterns = {
-        "hourly_distribution": defaultdict(int),  # 0-23 hours
-        "day_of_week": defaultdict(int),  # Mon-Sun
-        "productivity_by_hour": {},  # Productive vs distraction sites by hour
-        "session_patterns": {
-            "morning_routine": [],  # First sites visited 6-9am
-            "lunch_break": [],      # 11:30-13:00 patterns
-            "evening_wind_down": [] # After 21:00
-        },
-        "habit_analysis": {
-            "daily_checks": [],  # Sites visited same time daily
-            "monday_morning": [],  # Weekly patterns
-            "weekend_different": {}  # How weekends differ
-        }
-    }
-    
-    # This is different from sessions - it's about TIME patterns
-    for entry in history_data:
-        visit_time = datetime.fromisoformat(entry['last_visit_time'])
-        hour = visit_time.hour
-        dow = visit_time.strftime('%A')
-        
-        patterns["hourly_distribution"][hour] += 1
-        patterns["day_of_week"][dow] += 1
-        
-        # Identify habitual visits (same site, same hour, multiple days)
-        # ... more analysis
-    
-    return patterns
-
 async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, Dict]:
     """Categorize URLs into meaningful groups with patterns and subcategories.
     
@@ -1153,10 +1063,325 @@ def check_safari_accessibility() -> Dict[str, Any]:
     return result
 
 @mcp.tool()
+async def analyze_browsing_sessions(
+    history_data: List[Dict], 
+    max_gap_hours: float = 2.0,
+    include_patterns: bool = True
+) -> List[Dict]:
+    """
+    Comprehensive session analysis combining time patterns, categories, and metrics.
+    Returns enriched session data that's easy for Claude to interpret and report on.
+    """
+    
+    if not history_data:
+        return []
+    
+    # First, categorize all entries for lookup
+    categorized_lookup = {}
+    for entry in history_data:
+        url = entry['url'].lower()
+        domain = urlparse(url).netloc.lower()
+        
+        for category, config in BROWSING_CATEGORIES.items():
+            if any(d in domain for d in config['domains']):
+                categorized_lookup[entry['url']] = {
+                    'category': category,
+                    'subcategory': _get_subcategory(domain, config)
+                }
+                break
+    
+    # Sort by timestamp
+    sorted_history = sorted(history_data, key=lambda x: x['last_visit_time'])
+    
+    sessions = []
+    current_session = []
+    
+    for entry in sorted_history:
+        visit_time = datetime.fromisoformat(entry['last_visit_time'])
+        
+        if not current_session:
+            current_session = [entry]
+        else:
+            last_time = datetime.fromisoformat(current_session[-1]['last_visit_time'])
+            gap_hours = (visit_time - last_time).total_seconds() / 3600
+            
+            if gap_hours <= max_gap_hours:
+                current_session.append(entry)
+            else:
+                # Process completed session
+                sessions.append(_enrich_session(current_session, categorized_lookup))
+                current_session = [entry]
+    
+    # Don't forget the last session
+    if current_session:
+        sessions.append(_enrich_session(current_session, categorized_lookup))
+    
+    return sessions
+
+def _enrich_session(session_entries: List[Dict], categorized_lookup: Dict) -> Dict:
+    """
+    Enrich a session with comprehensive analytics.
+    This is where the magic happens for easy report generation.
+    """
+    start_time = datetime.fromisoformat(session_entries[0]['last_visit_time'])
+    end_time = datetime.fromisoformat(session_entries[-1]['last_visit_time'])
+    duration_minutes = (end_time - start_time).total_seconds() / 60
+    
+    # Category analysis
+    category_counts = Counter()
+    subcategory_counts = Counter()
+    domains_visited = Counter()
+    
+    for entry in session_entries:
+        domain = urlparse(entry['url']).netloc
+        domains_visited[domain] += 1
+        
+        if entry['url'] in categorized_lookup:
+            cat_info = categorized_lookup[entry['url']]
+            category_counts[cat_info['category']] += 1
+            if cat_info.get('subcategory'):
+                subcategory_counts[cat_info['subcategory']] += 1
+    
+    # Determine session character
+    total_entries = len(session_entries)
+    productive_count = sum(category_counts.get(cat, 0) for cat in ['development', 'learning', 'productivity'])
+    unproductive_count = sum(category_counts.get(cat, 0) for cat in ['social_media', 'entertainment', 'shopping'])
+    
+    # Session classification
+    if productive_count > total_entries * 0.7:
+        session_type = "highly_productive"
+    elif productive_count > total_entries * 0.5:
+        session_type = "mostly_productive"
+    elif unproductive_count > total_entries * 0.7:
+        session_type = "leisure"
+    elif unproductive_count > total_entries * 0.5:
+        session_type = "mostly_leisure"
+    else:
+        session_type = "mixed"
+    
+    # Time pattern analysis
+    hour = start_time.hour
+    day_of_week = start_time.strftime('%A')
+    is_weekend = start_time.weekday() >= 5
+    
+    # Time of day classification
+    if 5 <= hour < 9:
+        time_period = "early_morning"
+    elif 9 <= hour < 12:
+        time_period = "morning"
+    elif 12 <= hour < 13:
+        time_period = "lunch"
+    elif 13 <= hour < 17:
+        time_period = "afternoon"
+    elif 17 <= hour < 20:
+        time_period = "evening"
+    elif 20 <= hour < 23:
+        time_period = "night"
+    else:
+        time_period = "late_night"
+    
+    # Focus analysis
+    unique_domains = len(domains_visited)
+    domain_switches = _count_domain_switches(session_entries)
+    avg_time_per_domain = duration_minutes / unique_domains if unique_domains > 0 else 0
+    
+    # Identify if this was a "rabbit hole" session
+    is_rabbit_hole = (
+        unique_domains <= 3 and 
+        duration_minutes > 30 and 
+        max(domains_visited.values()) > 5
+    )
+    
+    # Identify if this was a "research" session
+    is_research = (
+        category_counts.get('learning', 0) + category_counts.get('development', 0) > total_entries * 0.5 and
+        unique_domains >= 5
+    )
+    
+    return {
+        # Basic info
+        'session_id': f"{start_time.isoformat()}_{total_entries}",
+        'start_time': start_time.isoformat(),
+        'end_time': end_time.isoformat(),
+        'duration_minutes': round(duration_minutes, 1),
+        'entry_count': total_entries,
+        
+        # Time patterns
+        'time_patterns': {
+            'day_of_week': day_of_week,
+            'is_weekend': is_weekend,
+            'hour_of_day': hour,
+            'time_period': time_period,
+        },
+        
+        # Category analysis
+        'category_distribution': dict(category_counts),
+        'subcategory_distribution': dict(subcategory_counts),
+        'dominant_category': category_counts.most_common(1)[0][0] if category_counts else 'uncategorized',
+        'session_type': session_type,
+        
+        # Focus metrics
+        'focus_metrics': {
+            'unique_domains': unique_domains,
+            'domain_switches': domain_switches,
+            'avg_time_per_domain': round(avg_time_per_domain, 1),
+            'top_domains': domains_visited.most_common(3),
+            'focus_score': _calculate_focus_score(unique_domains, domain_switches, duration_minutes),
+        },
+        
+        # Session characteristics
+        'characteristics': {
+            'is_rabbit_hole': is_rabbit_hole,
+            'is_research': is_research,
+            'is_productive': productive_count > unproductive_count,
+            'productivity_ratio': round(productive_count / total_entries, 2) if total_entries > 0 else 0,
+        },
+        
+        # Human-readable summary (for easy report generation)
+        'summary': _generate_session_summary(
+            session_type, time_period, duration_minutes, 
+            category_counts.most_common(1)[0][0] if category_counts else 'browsing',
+            is_rabbit_hole, is_research
+        ),
+        
+        # Keep the entries for detailed analysis if needed
+        'entries': session_entries
+    }
+
+def _count_domain_switches(entries: List[Dict]) -> int:
+    """Count how many times the user switched between domains."""
+    switches = 0
+    last_domain = None
+    
+    for entry in entries:
+        domain = urlparse(entry['url']).netloc
+        if last_domain and domain != last_domain:
+            switches += 1
+        last_domain = domain
+    
+    return switches
+
+def _calculate_focus_score(unique_domains: int, domain_switches: int, duration: float) -> float:
+    """
+    Calculate a focus score from 0-1.
+    Lower scores = more focused, higher scores = more scattered.
+    """
+    if duration == 0:
+        return 0
+    
+    # Normalize metrics
+    switches_per_minute = domain_switches / duration
+    domains_per_minute = unique_domains / duration
+    
+    # Focus score (inverted so higher is better)
+    scatter_score = min(1.0, (switches_per_minute + domains_per_minute) / 2)
+    return round(1 - scatter_score, 2)
+
+def _generate_session_summary(
+    session_type: str, 
+    time_period: str, 
+    duration: float,
+    dominant_category: str,
+    is_rabbit_hole: bool,
+    is_research: bool
+) -> str:
+    """Generate a human-readable session summary."""
+    
+    # Build the summary
+    parts = []
+    
+    # Duration descriptor
+    if duration < 5:
+        duration_desc = "quick"
+    elif duration < 15:
+        duration_desc = "short"
+    elif duration < 45:
+        duration_desc = "moderate"
+    elif duration < 90:
+        duration_desc = "long"
+    else:
+        duration_desc = "extended"
+    
+    # Main description
+    if is_rabbit_hole:
+        parts.append(f"A {duration_desc} {dominant_category} rabbit hole")
+    elif is_research:
+        parts.append(f"A {duration_desc} research session on {dominant_category}")
+    else:
+        parts.append(f"A {duration_desc} {session_type} session")
+    
+    # Time context
+    parts.append(f"during the {time_period}")
+    
+    # Duration
+    parts.append(f"({round(duration)} minutes)")
+    
+    return " ".join(parts)
+
+def _get_subcategory(domain: str, config: Dict) -> Optional[str]:
+    """Extract subcategory for a domain."""
+    if 'subcategories' not in config:
+        return None
+    
+    for subcat, patterns in config['subcategories'].items():
+        if any(p in domain for p in patterns if isinstance(p, str)):
+            return subcat
+    
+    return None
+
+@mcp.tool()
 def diagnose_safari_support() -> Dict[str, Any]:
     """Diagnose Safari support and accessibility. Useful for debugging Safari integration."""
     return check_safari_accessibility()
 
+
+def _describe_typical_session(sessions: List[Dict]) -> str:
+    """Generate a description of the typical browsing session."""
+    if not sessions:
+        return "No sessions found"
+    
+    avg_duration = sum(s['duration_minutes'] for s in sessions) / len(sessions)
+    most_common_type = Counter(s['session_type'] for s in sessions).most_common(1)[0][0]
+    most_common_time = Counter(s['time_patterns']['time_period'] for s in sessions).most_common(1)[0][0]
+    
+    return f"Typical session: {round(avg_duration)} minutes of {most_common_type} browsing, usually during {most_common_time}" 
+
+def _generate_productivity_summary(sessions: List[Dict]) -> str:
+    """Generate a productivity summary."""
+    if not sessions:
+        return "No sessions found"
+    
+    # filter sessions by productivity_ratio > 0.5
+    productive_sessions = [s for s in sessions if s['characteristics']['productivity_ratio'] > 0.5]
+    return f"Productivity summary: {round(sum(s['duration_minutes'] for s in productive_sessions))} minutes of productivity"
+
+def _describe_time_habits(sessions: List[Dict]) -> str:
+    """Generate a time habits summary."""
+    if not sessions:
+        return "No sessions found"
+    
+    # determine what times of days are correlated with each browsing category
+    # Use a dict with categories as keys and a list of times of day as values
+    time_habits = {}
+    for session in sessions:
+        for category, _ in BROWSING_CATEGORIES.items():
+            if session['category_distribution'][category] > 0:
+                time_habits[category].append(session['time_patterns']['time_period'])
+
+    return f"Time habits summary: {time_habits}"
+
+def _analyze_focus_patterns(sessions: List[Dict]) -> str:
+    """Generate a focus patterns summary."""
+    if not sessions:
+        return "No sessions found"
+    
+    # determine times of day and duration of session that are most correlated with productivity_ratio
+    # use a dict with times of day as keys and a list of durations as values
+    focus_patterns = {}
+    for session in sessions:
+        if session['characteristics']['productivity_ratio'] > 0.5:
+            focus_patterns[session['time_patterns']['time_period']].append(session['duration_minutes'])
+    return f"Focus patterns summary: {focus_patterns}"
 
 @mcp.tool()
 async def get_browsing_insights(time_period_in_days: int = 7, analysis_types: List[str] = ["sessions", "categories", "domains", "learning_paths", "productivity"]) -> Dict[str, Any]:
@@ -1174,21 +1399,47 @@ async def get_browsing_insights(time_period_in_days: int = 7, analysis_types: Li
         history_data: List of history entries from get_browser_history
         analysis_types: List of analysis types to perform
     """
+
     history = await get_browser_history(time_period_in_days, "", True)
-    browsing_sessions = await oroup_browsing_history_into_sessions(history)
-    time_patterns = await analyze_time_patterns(history)
+    
+    # Use the new enriched session analysis
+    enriched_sessions = await analyze_browsing_sessions(history)
+    
+    # Generate session-based insights
+    session_insights = {
+        'total_sessions': len(enriched_sessions),
+        'avg_session_duration': sum(s['duration_minutes'] for s in enriched_sessions) / len(enriched_sessions) if enriched_sessions else 0,
+        'session_types': Counter(s['session_type'] for s in enriched_sessions),
+        'time_period_distribution': Counter(s['time_patterns']['time_period'] for s in enriched_sessions),
+        'productive_sessions': sum(1 for s in enriched_sessions if s['characteristics']['is_productive']),
+        'rabbit_holes': [s for s in enriched_sessions if s['characteristics']['is_rabbit_hole']],
+        'research_sessions': [s for s in enriched_sessions if s['characteristics']['is_research']],
+        'weekend_vs_weekday': {
+            'weekend': [s for s in enriched_sessions if s['time_patterns']['is_weekend']],
+            'weekday': [s for s in enriched_sessions if not s['time_patterns']['is_weekend']]
+        }
+    }
+        # Still include other analyses for comprehensive view
     categorized_data = await categorize_browsing_history(history)
     domain_stats = await analyze_domain_frequency(history)
     learning_paths = await find_learning_paths(history)
     productivity_metrics = await calculate_productivity_metrics(categorized_data)
+    
     return {
-        "browsing_sessions": browsing_sessions,
-        "time_patterns": time_patterns,
-        "categorized_data": categorized_data,
-        "domain_stats": domain_stats,
-        "learning_paths": learning_paths,
-        "productivity_metrics": productivity_metrics
-    }
+            "enriched_sessions": enriched_sessions,  # The new comprehensive sessions
+            "session_insights": session_insights,     # Aggregated insights
+            "categorized_data": categorized_data,
+            "domain_stats": domain_stats,
+            "learning_paths": learning_paths,
+            "productivity_metrics": productivity_metrics,
+            "report_helpers": {
+                # Pre-formatted insights for easy report generation
+                "typical_session": _describe_typical_session(enriched_sessions),
+                "productivity_summary": _generate_productivity_summary(enriched_sessions),
+                "time_habits": _describe_time_habits(enriched_sessions),
+                "focus_analysis": _analyze_focus_patterns(enriched_sessions)
+            }
+        }
 
 @mcp.tool()
 async def search_browser_history(
