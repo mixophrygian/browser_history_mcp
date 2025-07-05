@@ -1,370 +1,19 @@
 import sqlite3
-import os
-import platform
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-import logging
 from typing import Dict, List, Optional, Any
 from mcp.server.fastmcp import FastMCP
 from urllib.parse import urlparse
 from collections import Counter, defaultdict
 import re
-from functools import lru_cache
-import glob
+from datetime import datetime
+import os
+from BROWSING_CATEGORIES import BROWSING_CATEGORIES
+from local_types import HistoryEntryDict, CachedHistory, CategoryEntry, DomainStat, LearningPath, ProductivityMetrics, EnrichedSession, BrowserInsightsOutput, ensure_history_entry_dict
+from browser_utils import PATH_TO_FIREFOX_HISTORY, PATH_TO_CHROME_HISTORY, PATH_TO_SAFARI_HISTORY, get_firefox_history, get_chrome_history, get_safari_history, get_safari_profile_path
+from general_utils import logger
+from prompts import PRODUCTIVITY_ANALYSIS_PROMPT, LEARNING_ANALYSIS_PROMPT, RESEARCH_TOPIC_EXTRACTION_PROMPT
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("browser-storage-mcp")
-
-BROWSING_CATEGORIES = { # update this to include sites you want to track
-    'social_media': {
-        'domains': [
-            'facebook.com', 'twitter.com', 'x.com', 'instagram.com', 'reddit.com', 
-            'linkedin.com', 'tiktok.com', 'snapchat.com', 'pinterest.com', 
-            'tumblr.com', 'discord.com', 'slack.com', 'whatsapp.com', 'telegram.org',
-            'mastodon.social', 'threads.net', 'bsky.social', 'bereal.com'
-        ],
-        'patterns': [r'social', r'/comments/', r'/status/', r'/post/'],
-        'subcategories': {
-            'professional': ['linkedin.com', 'slack.com'],
-            'messaging': ['whatsapp.com', 'telegram.org', 'discord.com'],
-            'content_sharing': ['instagram.com', 'tiktok.com', 'pinterest.com']
-        }
-    },
-    
-    'entertainment': {
-        'domains': [
-            'youtube.com', 'netflix.com', 'spotify.com', 'twitch.tv', 'hulu.com',
-            'disneyplus.com', 'hbomax.com', 'primevideo.com', 'vimeo.com',
-            'soundcloud.com', 'pandora.com', 'applemusic.com', 'deezer.com',
-            'crunchyroll.com', 'funimation.com', 'steam.com', 'epicgames.com',
-            'ign.com', 'gamespot.com', 'kotaku.com', 'polygon.com'
-        ],
-        'patterns': [r'/watch', r'/video/', r'/episode/', r'/game/', r'wiki\.fandom\.com'],
-        'subcategories': {
-            'video': ['youtube.com', 'netflix.com', 'twitch.tv'],
-            'music': ['spotify.com', 'soundcloud.com', 'pandora.com'],
-            'gaming': ['steam.com', 'epicgames.com', 'ign.com', r'\.fandom\.com']
-        }
-    },
-    
-    'development': {
-        'domains': [
-            'stackoverflow.com', 'github.com', 'gitlab.com', 'bitbucket.org',
-            'developer.mozilla.org', 'w3schools.com', 'css-tricks.com',
-            'dev.to', 'hashnode.dev', 'codesandbox.io', 'codepen.io',
-            'jsfiddle.net', 'replit.com', 'vercel.com', 'netlify.com',
-            'npmjs.com', 'pypi.org', 'crates.io', 'packagist.org',
-            'docker.com', 'kubernetes.io', 'terraform.io'
-        ],
-        'patterns': [
-            r'docs\..*\.(?:com|org|io)', r'.*\.readthedocs\.io', r'/documentation/',
-            r'/api/', r'/reference/', r'github\.com/.*/(?:issues|pull|wiki)',
-            r'stackoverflow\.com/questions/'
-        ],
-        'subcategories': {
-            'q&a': ['stackoverflow.com', 'dev.to'],
-            'repositories': ['github.com', 'gitlab.com', 'bitbucket.org'],
-            'documentation': [r'docs\.', r'\.readthedocs\.io', 'developer.mozilla.org'],
-            'tools': ['codesandbox.io', 'codepen.io', 'replit.com']
-        }
-    },
-    
-    'learning': {
-        'domains': [
-            'coursera.org', 'udemy.com', 'edx.org', 'khanacademy.org',
-            'udacity.com', 'pluralsight.com', 'lynda.com', 'skillshare.com',
-            'masterclass.com', 'brilliant.org', 'datacamp.com', 'codecademy.com',
-            'freecodecamp.org', 'mit.edu', 'stanford.edu', 'harvard.edu',
-            'arxiv.org', 'scholar.google.com', 'jstor.org', 'pubmed.ncbi.nlm.nih.gov',
-            'wikipedia.org', 'wikihow.com', 'instructables.com'
-        ],
-        'patterns': [
-            r'/course/', r'/tutorial/', r'/learn/', r'/guide/', r'/how-to',
-            r'\.edu/', r'/research/', r'/paper/', r'/study/'
-        ],
-        'subcategories': {
-            'moocs': ['coursera.org', 'udemy.com', 'edx.org'],
-            'technical': ['freecodecamp.org', 'codecademy.com', 'datacamp.com'],
-            'academic': ['arxiv.org', 'scholar.google.com', 'jstor.org', r'\.edu/'],
-            'practical': ['wikihow.com', 'instructables.com']
-        }
-    },
-    
-    'productivity': {
-        'domains': [
-            'notion.so', 'trello.com', 'asana.com', 'todoist.com', 'monday.com',
-            'clickup.com', 'airtable.com', 'basecamp.com', 'jira.atlassian.com',
-            'confluence.atlassian.com', 'evernote.com', 'onenote.com', 'obsidian.md',
-            'roamresearch.com', 'workflowy.com', 'calendar.google.com', 'outlook.com',
-            'zoom.us', 'meet.google.com', 'teams.microsoft.com', 'calendly.com'
-        ],
-        'patterns': [r'/calendar/', r'/tasks/', r'/projects/', r'/workspace/'],
-        'subcategories': {
-            'project_management': ['trello.com', 'asana.com', 'jira.atlassian.com'],
-            'notes': ['notion.so', 'evernote.com', 'obsidian.md'],
-            'communication': ['zoom.us', 'meet.google.com', 'teams.microsoft.com']
-        }
-    },
-    
-    'news': {
-        'domains': [
-            'nytimes.com', 'washingtonpost.com', 'wsj.com', 'ft.com', 'economist.com',
-            'bbc.com', 'cnn.com', 'reuters.com', 'apnews.com', 'npr.org',
-            'theguardian.com', 'foxnews.com', 'nbcnews.com', 'abcnews.go.com',
-            'usatoday.com', 'politico.com', 'axios.com', 'bloomberg.com',
-            'techcrunch.com', 'theverge.com', 'arstechnica.com', 'wired.com',
-            'hackernews.com', 'news.ycombinator.com', 'lobste.rs', 'slashdot.org'
-        ],
-        'patterns': [r'/article/', r'/story/', r'/news/', r'/\d{4}/\d{2}/\d{2}/'],
-        'subcategories': {
-            'mainstream': ['nytimes.com', 'bbc.com', 'cnn.com'],
-            'tech': ['techcrunch.com', 'theverge.com', 'arstechnica.com'],
-            'aggregators': ['news.ycombinator.com', 'reddit.com/r/news']
-        }
-    },
-    
-    'shopping': {
-        'domains': [
-            'amazon.com', 'ebay.com', 'etsy.com', 'alibaba.com', 'walmart.com',
-            'target.com', 'bestbuy.com', 'homedepot.com', 'lowes.com', 'ikea.com',
-            'wayfair.com', 'shopify.com', 'wish.com', 'costco.com', 'sephora.com',
-            'ulta.com', 'nike.com', 'adidas.com', 'apple.com', 'samsung.com'
-        ],
-        'patterns': [r'/product/', r'/cart/', r'/checkout/', r'/shop/', r'/store/'],
-        'subcategories': {
-            'marketplace': ['amazon.com', 'ebay.com', 'etsy.com'],
-            'retail': ['walmart.com', 'target.com', 'costco.com'],
-            'specialty': ['sephora.com', 'nike.com', 'apple.com']
-        }
-    },
-    
-    'finance': {
-        'domains': [
-            'chase.com', 'bankofamerica.com', 'wellsfargo.com', 'citi.com',
-            'paypal.com', 'venmo.com', 'cashapp.com', 'zelle.com', 'wise.com',
-            'coinbase.com', 'binance.com', 'kraken.com', 'robinhood.com',
-            'etrade.com', 'fidelity.com', 'vanguard.com', 'schwab.com',
-            'mint.com', 'ynab.com', 'personalcapital.com', 'creditkarma.com'
-        ],
-        'patterns': [r'/banking/', r'/wallet/', r'/account/', r'/trading/'],
-        'subcategories': {
-            'banking': ['chase.com', 'bankofamerica.com', 'wellsfargo.com'],
-            'payments': ['paypal.com', 'venmo.com', 'cashapp.com'],
-            'investing': ['robinhood.com', 'fidelity.com', 'vanguard.com'],
-            'crypto': ['coinbase.com', 'binance.com', 'kraken.com']
-        }
-    },
-    
-    'health': {
-        'domains': [
-            'webmd.com', 'mayoclinic.org', 'healthline.com', 'medlineplus.gov',
-            'nih.gov', 'cdc.gov', 'who.int', 'drugs.com', 'rxlist.com',
-            'myfitnesspal.com', 'fitbit.com', 'strava.com', 'headspace.com',
-            'calm.com', 'betterhelp.com', 'talkspace.com', 'zocdoc.com'
-        ],
-        'patterns': [r'/health/', r'/medical/', r'/symptoms/', r'/conditions/'],
-        'subcategories': {
-            'medical_info': ['webmd.com', 'mayoclinic.org', 'healthline.com'],
-            'fitness': ['myfitnesspal.com', 'fitbit.com', 'strava.com'],
-            'mental_health': ['headspace.com', 'calm.com', 'betterhelp.com']
-        }
-    },
-    
-    'reference': {
-        'domains': [
-            'google.com', 'bing.com', 'duckduckgo.com', 'yandex.com', 'baidu.com',
-            'dictionary.com', 'thesaurus.com', 'merriam-webster.com', 'oxforddictionaries.com',
-            'translate.google.com', 'deepl.com', 'wolframalpha.com', 'archive.org',
-            'maps.google.com', 'openstreetmap.org', 'waze.com', 'weather.com',
-            'timeanddate.com', 'xe.com', 'calculator.net'
-        ],
-        'patterns': [r'/search', r'/define/', r'/translate/', r'/maps/', r'/directions/'],
-        'subcategories': {
-            'search': ['google.com', 'bing.com', 'duckduckgo.com'],
-            'language': ['dictionary.com', 'translate.google.com', 'deepl.com'],
-            'utilities': ['maps.google.com', 'weather.com', 'xe.com']
-        }
-    },
-    
-    'professional': {
-        'domains': [
-            'salesforce.com', 'hubspot.com', 'zendesk.com', 'intercom.com',
-            'mailchimp.com', 'constantcontact.com', 'hootsuite.com', 'buffer.com',
-            'canva.com', 'figma.com', 'adobe.com', 'sketch.com', 'miro.com',
-            'tableau.com', 'powerbi.microsoft.com', 'datastudio.google.com'
-        ],
-        'patterns': [r'/dashboard/', r'/analytics/', r'/reports/', r'/design/'],
-        'subcategories': {
-            'crm': ['salesforce.com', 'hubspot.com', 'zendesk.com'],
-            'marketing': ['mailchimp.com', 'hootsuite.com', 'buffer.com'],
-            'design': ['canva.com', 'figma.com', 'adobe.com'],
-            'analytics': ['tableau.com', 'powerbi.microsoft.com']
-        }
-    }
-}
-
-def get_firefox_profile_path() -> Optional[str]:
-    """Automatically detect Firefox profile directory based on OS"""
-    system = platform.system().lower()
-    
-    if system == "darwin":  # macOS
-        base_path = os.path.expanduser("~/Library/Application Support/Firefox/Profiles")
-    elif system == "linux":
-        base_path = os.path.expanduser("~/.mozilla/firefox")
-    elif system == "windows":
-        base_path = os.path.join(os.getenv('APPDATA', ''), "Mozilla", "Firefox", "Profiles")
-    else:
-        logger.warning(f"Unsupported operating system: {system}")
-        return None
-    
-    if not os.path.exists(base_path):
-        logger.warning(f"Firefox profiles directory not found at: {base_path}")
-        return None
-    
-    # Look for default profile directories
-    profile_patterns = ["*.default-release", "*.default"]
-    for pattern in profile_patterns:
-        matches = glob.glob(os.path.join(base_path, pattern))
-        if matches:
-            # Return the first match (usually there's only one default profile)
-            profile_path = matches[0]
-            logger.info(f"Found Firefox profile: {profile_path}")
-            return profile_path
-    
-    logger.warning(f"No default Firefox profile found in: {base_path}")
-    return None
-
-def get_firefox_history_path() -> Optional[str]:
-    """Get the path to Firefox history database"""
-    profile_path = get_firefox_profile_path()
-    if not profile_path:
-        return None
-     
-    history_path = os.path.join(profile_path, "places.sqlite")
-    if os.path.exists(history_path):
-        return history_path
-    else:
-        logger.warning(f"Firefox history database not found at: {history_path}")
-        return None
-
-def get_chrome_profile_path() -> Optional[str]:
-    """Automatically detect Chrome profile directory based on OS"""
-    system = platform.system().lower()
-    
-    if system == "darwin":  # macOS
-        base_path = os.path.expanduser("~/Library/Application Support/Google/Chrome")
-    elif system == "linux":
-        base_path = os.path.expanduser("~/.config/google-chrome")
-    elif system == "windows":
-        base_path = os.path.join(os.getenv('LOCALAPPDATA', ''), "Google", "Chrome", "User Data")
-    else:
-        logger.warning(f"Unsupported operating system: {system}")
-        return None
-    
-    if not os.path.exists(base_path):
-        logger.warning(f"Chrome profiles directory not found at: {base_path}")
-        return None
-    
-    # Chrome typically uses "Default" as the main profile directory
-    profile_path = os.path.join(base_path, "Default")
-    if os.path.exists(profile_path):
-        logger.info(f"Found Chrome profile: {profile_path}")
-        return profile_path
-    
-    logger.warning(f"Chrome Default profile not found in: {base_path}")
-    return None
-
-def get_chrome_history_path() -> Optional[str]:
-    """Get the path to Chrome history database"""
-    profile_path = get_chrome_profile_path()
-    if not profile_path:
-        return None
-    
-    history_path = os.path.join(profile_path, "History")
-    if os.path.exists(history_path):
-        return history_path
-    else:
-        logger.warning(f"Chrome history database not found at: {history_path}")
-        return None
-
-def get_safari_profile_path() -> Optional[str]:
-    """Automatically detect Safari profile directory based on OS"""
-    system = platform.system().lower()
-    
-    if system == "darwin":  # macOS
-        # Safari stores its data in the WebKit directory
-        base_path = os.path.expanduser("~/Library/WebKit/com.apple.Safari")
-        
-        # Also check the traditional Safari location as fallback
-        if not os.path.exists(base_path):
-            base_path = os.path.expanduser("~/Library/Safari")
-    else:
-        logger.warning(f"Safari is only supported on macOS, not {system}")
-        return None
-    
-    if not os.path.exists(base_path):
-        logger.warning(f"Safari profiles directory not found at: {base_path}")
-        return None
-    
-    logger.info(f"Found Safari profile: {base_path}")
-    return base_path
-
-def get_safari_history_path() -> Optional[str]:
-    """Get the path to Safari history database"""
-    profile_path = get_safari_profile_path()
-    if not profile_path:
-        return None
-    
-    # Modern Safari (macOS 10.15+) uses different storage mechanisms
-    # Try different possible Safari database locations and names
-    possible_paths = [
-        # Traditional locations (older Safari versions)
-        os.path.join(profile_path, "History.db"),
-        os.path.join(profile_path, "WebpageIcons.db"),
-        os.path.join(profile_path, "Databases.db"),
-        
-        # Modern WebKit locations
-        os.path.join(profile_path, "WebsiteData", "LocalStorage"),
-        os.path.join(profile_path, "WebsiteData", "IndexedDB"),
-        os.path.join(profile_path, "WebsiteData", "ResourceLoadStatistics"),
-        
-        # Alternative locations for modern Safari
-        os.path.join(os.path.expanduser("~/Library/Safari"), "History.db"),
-        os.path.join(os.path.expanduser("~/Library/Safari"), "WebpageIcons.db"),
-        
-        # CloudKit-related locations
-        os.path.join(os.path.expanduser("~/Library/Application Support/CloudDocs/session/containers/iCloud.com.apple.Safari"), "Documents"),
-    ]
-    
-    for history_path in possible_paths:
-        if os.path.exists(history_path):
-            logger.info(f"Found Safari database at: {history_path}")
-            return history_path
-    
-    logger.warning(f"No Safari history database found in: {profile_path}")
-    logger.warning("Modern Safari (macOS 10.15+) uses CloudKit for history syncing and has limited programmatic access")
-    return None
-
-
-PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
-PATH_TO_CHROME_HISTORY = get_chrome_history_path()
-PATH_TO_SAFARI_HISTORY = get_safari_history_path()
-
-@dataclass(frozen=True)
-class HistoryEntry:
-    """Represents a single browser history entry"""
-    url: str
-    title: Optional[str]
-    visit_count: int
-    last_visit_time: datetime
-    
-    def to_dict(self) -> Dict:
-        return {
-            "url": self.url,
-            "title": self.title,
-            "visit_count": self.visit_count,
-            "last_visit_time": self.last_visit_time.isoformat()
-        }
+CACHED_HISTORY = CachedHistory(history=[], time_period_in_days=0, browser_type="auto-detected")
 
 @dataclass
 class AppContext:
@@ -374,312 +23,45 @@ class AppContext:
 
 mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox, Chrome, or Safari browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
 
+@mcp.tool()
+async def suggest_personalized_browser_categories() -> Dict[str, Any]:
+    """Returns uncategorized URLs found in the cached browsing history.
+    This tool is useful for suggesting categories for uncategorized URLs.
+    Requires that @get_browsing_insights (or any other tool that populates the cache) has been executed first.
+    """
+
+    history = CACHED_HISTORY.get_history()
+    if not history:
+        raise RuntimeError("No history found. Please run @get_browsing_insights first.")
+
+    # Categorize the history to find the uncategorized bucket
+    categorized_data = await categorize_browsing_history(history)
+
+    # `other` holds anything we failed to classify
+    uncategorized_entries = categorized_data.get("other", {}).get("entries", [])
+
+    # Extract just the URLs so we can return them to the user
+    new_categories = [e["url"] for e in uncategorized_entries]
+
+    return {"URLs without categories": new_categories}
+
+
 @mcp.prompt()
 def productivity_analysis() -> str:
     """Creates a comprehensive productivity analysis prompt"""
-    return """
-    Analyze the browser history to provide actionable productivity insights.
+    return PRODUCTIVITY_ANALYSIS_PROMPT
 
-    The MCP tool @get_browsing_insights will be used to get the browser history and insights.
-        
-    Then provide:
-    
-    1. **Time Distribution Analysis**
-       - Calculate percentage of time on work-related vs entertainment sites
-       - Identify peak productivity hours based on work-site visits
-       - Show time spent per domain/category
-    
-    2. **Session Pattern Recognition**
-       - Group visits into sessions (max 2-hour gaps between visits)
-       - Identify "rabbit hole" sessions (many related searches in sequence)
-       - Flag sessions that started productive but drifted
-    
-    3. **Focus Metrics**
-       - Average session duration on productive sites
-       - Number of context switches between work and entertainment
-       - Longest uninterrupted work sessions
-    
-    4. **Actionable Recommendations**
-       - Top 3 time-sink websites to consider blocking
-       - Optimal work hours based on historical patterns
-       - Specific habits to change (e.g., "You check Reddit 15x/day on average")
-    
-    Present findings in a clear format with specific numbers and time periods.
-    """
 
 @mcp.prompt()
 def learning_analysis() -> str:
     """Creates a deep learning pattern analysis prompt"""
-    return """
-    Analyze browser history through the lens of learning effectiveness:
-    
-    1. **Learning Pattern Classification**
-       - **Deep Learning**: Extended visits to documentation, tutorials, courses
-       - **Quick Fixes**: Stack Overflow visits < 2 minutes, copy-paste solutions
-       - **Research Sessions**: Multiple related sources in sequence
-       - **Reference Checks**: Repeated visits to same documentation
-    
-    2. **Knowledge Building Analysis**
-       - Identify learning trajectories (beginner → advanced topics)
-       - Spot knowledge gaps (frequent searches for same concepts)
-       - Track progression in specific technologies/topics
-    
-    3. **Learning Quality Metrics**
-       - Average time on educational content
-       - Depth score: ratio of documentation/tutorial time vs quick-answer sites
-       - Learning velocity: new topics explored per week
-    
-    4. **Improvement Opportunities**
-       - Topics frequently searched but never deeply studied
-       - Suggest foundational resources for frequently accessed quick-fixes
-       - Recommend structured learning paths based on scattered searches
-    
-    5. **Session Analysis**
-       - Group by learning sessions (2-hour gap threshold)
-       - Identify most productive learning times
-       - Flag interrupted learning sessions
-    
-    Format as actionable insights with specific examples from the history.
-    """
-
-@mcp.prompt()
-def privacy_audit() -> str:
-    """Creates a privacy and security analysis prompt"""
-    return """
-    Analyze browser history for privacy and security concerns:
-    
-    1. **Sensitive Information Exposure**
-       - Identify URLs containing personal information
-       - Flag unencrypted (http://) site visits
-       - Detect potential phishing domains
-    
-    2. **Digital Footprint Analysis**
-       - Most frequently visited sites
-       - Sites with account access (login pages)
-       - Third-party tracker exposure estimate
-    
-    3. **Recommendations**
-       - Sites that should use password manager
-       - Candidates for private browsing
-       - Services to consider replacing with privacy-focused alternatives
-    """
+    return LEARNING_ANALYSIS_PROMPT
 
 @mcp.prompt()
 def research_topic_extraction() -> str:
     """Extract and summarize research topics from browsing history"""
-    return """
-    Identify and summarize research topics from browsing patterns:
-    
-    1. **Topic Clustering**
-       - Group related searches and visits into research topics
-       - Identify primary research questions being explored
-       - Track evolution of research focus over time
-    
-    2. **Research Depth Analysis**
-       - Surface-level vs deep-dive research sessions
-       - Number of sources consulted per topic
-       - Time invested per research topic
-    
-    3. **Knowledge Synthesis**
-       - Create brief summaries of main research findings per topic
-       - Identify unanswered questions or incomplete research
-       - Suggest next steps for each research thread
-    
-    Format as a research notebook with topics, key findings, and open questions.
-    """
+    return RESEARCH_TOPIC_EXTRACTION_PROMPT
 
-def _get_firefox_history(days: int) -> List[HistoryEntry]:
-    """Get Firefox history from the last N days"""
-        # Check if database exists
-    if not os.path.exists(PATH_TO_FIREFOX_HISTORY):
-        raise RuntimeError(f"Firefox history not found at {PATH_TO_FIREFOX_HISTORY}")
-    
-    # Connect to the database
-    conn = sqlite3.connect(f"file:{PATH_TO_FIREFOX_HISTORY}?mode=ro", uri=True)
-    try:
-        cursor = conn.cursor()
-        
-        # Firefox stores timestamps as microseconds since Unix epoch
-        cutoff_time = (datetime.now() - timedelta(days=days)).timestamp() * 1_000_000
-        
-        query = """
-        SELECT DISTINCT h.url, h.title, h.visit_count, h.last_visit_date
-        FROM moz_places h
-        WHERE h.last_visit_date > ? 
-        AND h.hidden = 0
-        AND h.url NOT LIKE 'moz-extension://%'
-        ORDER BY h.last_visit_date DESC
-        """
-        
-        cursor.execute(query, (cutoff_time,))
-        results = cursor.fetchall()
-        
-        entries = []
-        for url, title, visit_count, last_visit_date in results:
-            # Convert Firefox timestamp (microseconds) to datetime
-            visit_time = datetime.fromtimestamp(last_visit_date / 1_000_000)
-            
-            entries.append(HistoryEntry(
-                url=url or "",
-                title=title,
-                visit_count=visit_count or 0,
-                last_visit_time=visit_time
-            ))
-        
-        return entries
-    except Exception as e:
-        logger.error(f"Error querying Firefox history: {e}")
-        raise RuntimeError(f"Failed to query Firefox history: {e}")
-    finally:
-        if conn:
-            conn.close()
-
-def _get_chrome_history(days: int) -> List[HistoryEntry]:
-    """Get Chrome history from the last N days"""
-    if not os.path.exists(PATH_TO_CHROME_HISTORY):
-        raise RuntimeError(f"Chrome history not found at {PATH_TO_CHROME_HISTORY}")
-    
-    # Connect to the database
-    conn = sqlite3.connect(f"file:{PATH_TO_CHROME_HISTORY}?mode=ro", uri=True)
-
-    try: 
-        cursor = conn.cursor()
-    
-        # Chrome stores timestamps as microseconds since Windows epoch (1601-01-01)
-        # Convert to Unix timestamp for comparison
-        windows_epoch_start = datetime(1601, 1, 1)
-        unix_epoch_start = datetime(1970, 1, 1)
-        epoch_diff = (unix_epoch_start - windows_epoch_start).total_seconds() * 1_000_000
-    
-        cutoff_time = (datetime.now() - timedelta(days=days)).timestamp() * 1_000_000 + epoch_diff
-        
-        query = """
-        SELECT DISTINCT u.url, u.title, u.visit_count, u.last_visit_time
-        FROM urls u
-        WHERE u.last_visit_time > ?
-        AND u.hidden = 0
-        ORDER BY u.last_visit_time DESC
-        """
-        
-        cursor.execute(query, (cutoff_time,))
-        results = cursor.fetchall()
-        
-        entries = []
-        for url, title, visit_count, last_visit_time in results:
-            # Convert Chrome timestamp to datetime
-            visit_time = datetime.fromtimestamp((last_visit_time - epoch_diff) / 1_000_000)
-            
-            entries.append(HistoryEntry(
-                url=url or "",
-                title=title or "No Title", 
-                visit_count=visit_count or 0,
-                last_visit_time=visit_time
-            ))
-        
-        return entries
-    except Exception as e:
-        logger.error(f"Error querying Chrome history: {e}")
-        raise RuntimeError(f"Failed to query Chrome history: {e}")
-    finally:
-        if conn:
-            conn.close()
-
-def _get_safari_history(days: int) -> List[HistoryEntry]:
-    """Get Safari history from the last N days"""
-    if not os.path.exists(PATH_TO_SAFARI_HISTORY):
-        raise RuntimeError(f"Safari history not found at {PATH_TO_SAFARI_HISTORY}")
-    
-    # Connect to the database
-    try:
-        conn = sqlite3.connect(f"file:{PATH_TO_SAFARI_HISTORY}?mode=ro", uri=True)
-    except sqlite3.OperationalError as e:
-        if "unable to open database file" in str(e).lower():
-            raise RuntimeError(
-                f"Cannot access Safari database: {e}. "
-                "Modern Safari (macOS 10.15+) uses CloudKit for history syncing and has limited programmatic access. "
-                "Consider using Firefox or Chrome for browser history analysis, or export Safari history manually through Safari's interface."
-            )
-        else:
-            raise RuntimeError(f"Failed to connect to Safari database: {e}")
-    
-    try: 
-        cursor = conn.cursor()
-        
-        # First, let's see what tables are available
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [row[0] for row in cursor.fetchall()]
-        logger.info(f"Available tables in Safari database: {tables}")
-        
-        # Safari stores timestamps as seconds since Unix epoch
-        cutoff_time = (datetime.now() - timedelta(days=days)).timestamp()
-        
-        # Try different possible Safari database structures
-        query = None
-        
-        # Check if we have the traditional history tables
-        if 'history_items' in tables and 'history_visits' in tables:
-            query = """
-            SELECT DISTINCT hi.url, hi.title, COUNT(hv.id) as visit_count, MAX(hv.visit_time) as last_visit_time
-            FROM history_items hi
-            JOIN history_visits hv ON hi.id = hv.history_item
-            WHERE hv.visit_time > ?
-            GROUP BY hi.id, hi.url, hi.title
-            ORDER BY last_visit_time DESC
-            """
-        elif 'urls' in tables:
-            # Fallback to Chrome-like structure
-            query = """
-            SELECT DISTINCT u.url, u.title, u.visit_count, u.last_visit_time
-            FROM urls u
-            WHERE u.last_visit_time > ?
-            ORDER BY u.last_visit_time DESC
-            """
-        elif 'moz_places' in tables:
-            # Fallback to Firefox-like structure
-            query = """
-            SELECT DISTINCT h.url, h.title, h.visit_count, h.last_visit_date
-            FROM moz_places h
-            WHERE h.last_visit_date > ? 
-            AND h.hidden = 0
-            ORDER BY h.last_visit_date DESC
-            """
-        
-        if query is None:
-            raise RuntimeError(
-                f"Safari database structure not recognized. Available tables: {tables}. "
-                "Modern Safari uses CloudKit for history syncing and has limited programmatic access. "
-                "Consider using Firefox or Chrome for browser history analysis."
-            )
-        
-        cursor.execute(query, (cutoff_time,))
-        results = cursor.fetchall()
-        
-        entries = []
-        for url, title, visit_count, last_visit_time in results:
-            # Convert Safari timestamp (seconds) to datetime
-            visit_time = datetime.fromtimestamp(last_visit_time)
-            
-            entries.append(HistoryEntry(
-                url=url or "",
-                title=title or "No Title", 
-                visit_count=visit_count or 0,
-                last_visit_time=visit_time
-            ))
-        
-        return entries
-    except Exception as e:
-        logger.error(f"Error querying Safari history: {e}")
-        if "no such table" in str(e).lower():
-            raise RuntimeError(
-                f"Safari database structure not supported: {e}. "
-                "Modern Safari uses CloudKit for history syncing and has limited programmatic access. "
-                "Consider using Firefox or Chrome for browser history analysis."
-            )
-        else:
-            raise RuntimeError(f"Failed to query Safari history: {e}")
-    finally:
-        if conn:
-            conn.close()
 
 @mcp.tool()
 def detect_active_browser() -> Dict[str, Any]:
@@ -739,7 +121,7 @@ def detect_active_browser() -> Dict[str, Any]:
     }
 
 
-async def get_browser_history(time_period_in_days: int, browser_type: Optional[str] = None, all_browsers: bool = False) -> List[Dict]:
+async def get_browser_history(time_period_in_days: int, browser_type: Optional[str] = None, all_browsers: bool = False) -> List[HistoryEntryDict]:
     """Get browser history from the specified browser(s) for the given time period.
     
     Args:
@@ -753,9 +135,9 @@ async def get_browser_history(time_period_in_days: int, browser_type: Optional[s
     
     # Map browser types to their handler functions
     browser_handlers = {
-        "firefox": _get_firefox_history,
-        "chrome": _get_chrome_history,
-        "safari": _get_safari_history
+        "firefox": get_firefox_history,
+        "chrome": get_chrome_history,
+        "safari": get_safari_history
     }
     
     if all_browsers:
@@ -805,7 +187,14 @@ async def get_browser_history(time_period_in_days: int, browser_type: Optional[s
         try:
             entries = browser_handlers[browser_type](time_period_in_days)
             logger.info(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
-            return [entry.to_dict() for entry in entries]
+
+            # Ensure we are always working with dictionaries
+            entries_dict = [ensure_history_entry_dict(e) for e in entries]
+
+            # Cache the history for later use
+            CACHED_HISTORY.add_history(entries_dict, time_period_in_days, browser_type)
+
+            return entries_dict
         except sqlite3.Error as e:
             logger.error(f"Error querying {browser_type} history: {e}")
             raise RuntimeError(f"Failed to query {browser_type} history: {e}. Try closing the browser - history is locked while the browser is running.")
@@ -813,7 +202,7 @@ async def get_browser_history(time_period_in_days: int, browser_type: Optional[s
             logger.error(f"Unexpected error querying {browser_type} history: {e}")
             raise RuntimeError(f"Failed to query {browser_type} history: {e}")
 
-async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, Dict]:
+async def categorize_browsing_history(history_data: List[HistoryEntryDict]) -> Dict[str, CategoryEntry]:
     """Categorize URLs into meaningful groups with patterns and subcategories.
     
     Args:
@@ -830,7 +219,10 @@ async def categorize_browsing_history(history_data: List[Dict]) -> Dict[str, Dic
     
     uncategorized = []
     
-    for entry in history_data:
+    for raw_entry in history_data:
+        # Allow HistoryEntry objects to be passed directly
+        entry = ensure_history_entry_dict(raw_entry)
+
         url = entry['url'].lower()
         domain = urlparse(url).netloc.lower()
         categorized_flag = False
@@ -880,7 +272,7 @@ def _add_to_category(category_data, entry, domain, config):
                 category_data['subcategories'][subcat].append(entry)
                 break
 
-async def analyze_domain_frequency(history_data: List[Dict], top_n: int = 20) -> List[Dict]:
+async def analyze_domain_frequency(history_data: List[HistoryEntryDict], top_n: int = 20) -> List[DomainStat]:
     """Analyze most frequently visited domains.
     
     Args:
@@ -913,7 +305,7 @@ async def analyze_domain_frequency(history_data: List[Dict], top_n: int = 20) ->
     
     return domain_list[:top_n]
 
-async def find_learning_paths(history_data: List[Dict]) -> List[Dict]:
+async def find_learning_paths(history_data: List[HistoryEntryDict]) -> List[LearningPath]:
     """Identify learning progressions in browsing history.
     
     Args:
@@ -982,7 +374,7 @@ async def find_learning_paths(history_data: List[Dict]) -> List[Dict]:
     
     return learning_sessions
 
-async def calculate_productivity_metrics(categorized_data: Dict[str, Dict]) -> Dict:
+async def calculate_productivity_metrics(categorized_data: Dict[str, CategoryEntry]) -> ProductivityMetrics:
     """Calculate productivity metrics from categorized browsing data.
     
     Args:
@@ -1064,10 +456,10 @@ def check_safari_accessibility() -> Dict[str, Any]:
 
 @mcp.tool()
 async def analyze_browsing_sessions(
-    history_data: List[Dict], 
+    history_data: List[HistoryEntryDict], 
     max_gap_hours: float = 2.0,
     include_patterns: bool = True
-) -> List[Dict]:
+) -> List[EnrichedSession]:
     """
     Comprehensive session analysis combining time patterns, categories, and metrics.
     Returns enriched session data that's easy for Claude to interpret and report on.
@@ -1118,7 +510,7 @@ async def analyze_browsing_sessions(
     
     return sessions
 
-def _enrich_session(session_entries: List[Dict], categorized_lookup: Dict) -> Dict:
+def _enrich_session(session_entries: List[HistoryEntryDict], categorized_lookup: Dict) -> EnrichedSession:
     """
     Enrich a session with comprehensive analytics.
     This is where the magic happens for easy report generation.
@@ -1248,7 +640,7 @@ def _enrich_session(session_entries: List[Dict], categorized_lookup: Dict) -> Di
         'entries': session_entries
     }
 
-def _count_domain_switches(entries: List[Dict]) -> int:
+def _count_domain_switches(entries: List[HistoryEntryDict]) -> int:
     """Count how many times the user switched between domains."""
     switches = 0
     last_domain = None
@@ -1335,7 +727,7 @@ def diagnose_safari_support() -> Dict[str, Any]:
     return check_safari_accessibility()
 
 
-def _describe_typical_session(sessions: List[Dict]) -> str:
+def _describe_typical_session(sessions: List[EnrichedSession]) -> str:
     """Generate a description of the typical browsing session."""
     if not sessions:
         return "No sessions found"
@@ -1346,7 +738,7 @@ def _describe_typical_session(sessions: List[Dict]) -> str:
     
     return f"Typical session: {round(avg_duration)} minutes of {most_common_type} browsing, usually during {most_common_time}" 
 
-def _generate_productivity_summary(sessions: List[Dict]) -> str:
+def _generate_productivity_summary(sessions: List[EnrichedSession]) -> str:
     """Generate a productivity summary."""
     if not sessions:
         return "No sessions found"
@@ -1355,53 +747,59 @@ def _generate_productivity_summary(sessions: List[Dict]) -> str:
     productive_sessions = [s for s in sessions if s['characteristics']['productivity_ratio'] > 0.5]
     return f"Productivity summary: {round(sum(s['duration_minutes'] for s in productive_sessions))} minutes of productivity"
 
-def _describe_time_habits(sessions: List[Dict]) -> str:
+def _describe_time_habits(sessions: List[EnrichedSession]) -> str:
     """Generate a time habits summary."""
     if not sessions:
         return "No sessions found"
     
     # determine what times of days are correlated with each browsing category
     # Use a dict with categories as keys and a list of times of day as values
-    time_habits = {}
+    time_habits = defaultdict(list)
     for session in sessions:
         for category, _ in BROWSING_CATEGORIES.items():
-            if session['category_distribution'][category] > 0:
+            if session['category_distribution'].get(category, 0) > 0:
                 time_habits[category].append(session['time_patterns']['time_period'])
 
-    return f"Time habits summary: {time_habits}"
+    return f"Time habits summary: {dict(time_habits)}"
 
-def _analyze_focus_patterns(sessions: List[Dict]) -> str:
+def _analyze_focus_patterns(sessions: List[EnrichedSession]) -> str:
     """Generate a focus patterns summary."""
     if not sessions:
         return "No sessions found"
     
     # determine times of day and duration of session that are most correlated with productivity_ratio
     # use a dict with times of day as keys and a list of durations as values
-    focus_patterns = {}
+    focus_patterns = defaultdict(list)
     for session in sessions:
         if session['characteristics']['productivity_ratio'] > 0.5:
             focus_patterns[session['time_patterns']['time_period']].append(session['duration_minutes'])
-    return f"Focus patterns summary: {focus_patterns}"
+    return f"Focus patterns summary: {dict(focus_patterns)}"
 
 @mcp.tool()
-async def get_browsing_insights(time_period_in_days: int = 7, analysis_types: List[str] = ["sessions", "categories", "domains", "learning_paths", "productivity"]) -> Dict[str, Any]:
+async def get_browsing_insights(time_period_in_days: int = 7) -> BrowserInsightsOutput:
     """Analyze browsing history based on selected analysis types.
     This tool will get the browser history from the specified browser(s) for the given time period.
     It will then group the history into sessions, categorize the history, analyze the domains, find learning paths, and calculate productivity metrics.
     It will return a dictionary with the following keys:
-    - browsing_sessions: List of browsing sessions
+    - enriched_sessions: List of browsing sessions
+    - session_insights: Aggregated insights
     - categorized_data: Categorized browsing data
     - domain_stats: Domain statistics
     - learning_paths: Learning paths
     - productivity_metrics: Productivity metrics
+    - report_helpers: Pre-formatted insights for easy report generation
+
+    If the history is already cached, it will return the cached history.
     
     Args:
         history_data: List of history entries from get_browser_history
         analysis_types: List of analysis types to perform
     """
-
-    history = await get_browser_history(time_period_in_days, "", True)
+    # check if CACHED_HISTORY has history for the given time period and browser type
+    if CACHED_HISTORY.metadata['time_period_days'] == time_period_in_days and CACHED_HISTORY.metadata['browser_type'] == "":
+        return CACHED_HISTORY.get_history()
     
+    history = await get_browser_history(time_period_in_days, "", True)
     # Use the new enriched session analysis
     enriched_sessions = await analyze_browsing_sessions(history)
     
@@ -1425,7 +823,7 @@ async def get_browsing_insights(time_period_in_days: int = 7, analysis_types: Li
     learning_paths = await find_learning_paths(history)
     productivity_metrics = await calculate_productivity_metrics(categorized_data)
     
-    return {
+    new_history = {
             "enriched_sessions": enriched_sessions,  # The new comprehensive sessions
             "session_insights": session_insights,     # Aggregated insights
             "categorized_data": categorized_data,
@@ -1439,20 +837,21 @@ async def get_browsing_insights(time_period_in_days: int = 7, analysis_types: Li
                 "time_habits": _describe_time_habits(enriched_sessions),
                 "focus_analysis": _analyze_focus_patterns(enriched_sessions)
             }
-        }
+        }  # type: BrowserInsightsOutput
+    CACHED_HISTORY.add_history(history, time_period_in_days, "")
+    return new_history
 
 @mcp.tool()
 async def search_browser_history(
     query: str,
-    browser_history: List[Dict],
-) -> List[Dict]:
-    """This tool can only be used after the tool @get_browser_history has been used to get the browser history.
+) -> List[HistoryEntryDict]:
+    """This tool can only be used after the tool @get_browsing_insights has been used to get the browser history, at least once.
     It will search the browser history for the query and return the results.
     """     
     query_lower = query.lower()
     results = []
     
-    for entry in browser_history:
+    for entry in CACHED_HISTORY.get_history():
         url = entry.get('url', '')
         title = entry.get('title', '')
         
