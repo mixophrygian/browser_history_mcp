@@ -1,7 +1,7 @@
 [project]
 name = "browser-mcp-server"
 version = "0.1.0"
-description = "An mcp server to access your Firefox or Chrome history"
+description = "An mcp server to access and analyze your Firefox or Chrome history"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
