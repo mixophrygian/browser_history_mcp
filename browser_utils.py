@@ -1,10 +1,11 @@
 import os
 import platform
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import sqlite3
+import glob
 from datetime import datetime, timedelta
 from general_utils import logger
-from local_types import HistoryEntry
+from local_types import HistoryEntry, CachedHistory, ensure_history_entry_dict, HistoryEntryDict
 
 
 # FIREFOX
@@ -99,6 +100,7 @@ def get_firefox_history(days: int) -> List[HistoryEntry]:
         if conn:
             conn.close()
 
+# CHROME
 def get_chrome_profile_path() -> Optional[str]:
     """Automatically detect Chrome profile directory based on OS"""
     system = platform.system().lower()
@@ -189,6 +191,8 @@ def get_chrome_history(days: int) -> List[HistoryEntry]:
     finally:
         if conn:
             conn.close()
+
+# SAFARI
 
 def get_safari_profile_path() -> Optional[str]:
     """Automatically detect Safari profile directory based on OS"""
@@ -345,6 +349,200 @@ def get_safari_history(days: int) -> List[HistoryEntry]:
         if conn:
             conn.close()
 
+def check_safari_accessibility() -> Dict[str, Any]:
+    """Check Safari accessibility and provide diagnostics"""
+    result = {
+        "safari_installed": os.path.exists("/Applications/Safari.app"),
+        "profile_path": get_safari_profile_path(),
+        "history_path": PATH_TO_SAFARI_HISTORY,
+        "accessible": False,
+        "error": None,
+        "limitations": "Modern Safari (macOS 10.15+) uses CloudKit for history syncing and has limited programmatic access"
+    }
+    
+    if not result["safari_installed"]:
+        result["error"] = "Safari is not installed"
+        return result
+    
+    if not result["history_path"]:
+        result["error"] = "Safari history database not found"
+        result["recommendation"] = "Consider using Firefox or Chrome for browser history analysis, or export Safari history manually through Safari's interface"
+        return result
+    
+    try:
+        # Try to connect to the database
+        conn = sqlite3.connect(f"file:{result['history_path']}?mode=ro", uri=True)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        result["accessible"] = True
+        result["tables"] = tables
+        result["message"] = f"Safari database accessible with {len(tables)} tables"
+        result["note"] = "This may be limited data - modern Safari uses CloudKit for full history syncing"
+    except Exception as e:
+        result["error"] = str(e)
+        result["message"] = "Safari database not accessible"
+        result["recommendation"] = "Modern Safari has limited programmatic access. Consider using Firefox or Chrome for browser history analysis"
+    
+    return result
+# UTILS
+
+def tool_detect_active_browser() -> Dict[str, Any]:
+    browsers_to_check = []
+    
+    # Check Firefox
+    if PATH_TO_FIREFOX_HISTORY:
+        browsers_to_check.append(('firefox', PATH_TO_FIREFOX_HISTORY))
+    
+    # Check Chrome
+    if PATH_TO_CHROME_HISTORY:
+        browsers_to_check.append(('chrome', PATH_TO_CHROME_HISTORY))
+    
+    # Check Safari
+    if PATH_TO_SAFARI_HISTORY:
+        browsers_to_check.append(('safari', PATH_TO_SAFARI_HISTORY))
+    
+    if not browsers_to_check:
+        logger.warning("No browser history databases found")
+        return None
+    
+    browsers_in_use = []
+    for browser_name, db_path in browsers_to_check:
+        try:
+            # Try to connect with read-only mode
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.close()
+            logger.info(f"Successfully connected to {browser_name} database - browser is likely closed")
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower():
+                logger.info(f"Database locked for {browser_name} - browser is likely open and active")
+                browsers_in_use.append(browser_name)
+            else:
+                logger.warning(f"Error connecting to {browser_name} database: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error connecting to {browser_name} database: {e}")
+    
+    # If no browser is locked, return all available browsers
+    if not browsers_in_use and browsers_to_check:
+        available_browsers = [browser[0] for browser in browsers_to_check]
+        logger.info(f"No active browser detected, available browsers: {available_browsers}")
+        return {
+            "available_browsers": available_browsers,
+            "active_browsers": [],
+            "recommended_action": "Please close all browsers to analyze history. You can restore tabs with Ctrl+Shift+T"
+        }
+    
+    return {
+        "available_browsers": [browser[0] for browser in browsers_to_check],
+        "active_browsers": browsers_in_use,  # Currently running
+        "recommended_action": "Please close the browser to analyze its history. You can restore tabs with Ctrl+Shift+T"
+    }
+
 PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
 PATH_TO_CHROME_HISTORY = get_chrome_history_path()
 PATH_TO_SAFARI_HISTORY = get_safari_history_path()
+
+async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: CachedHistory, browser_type: Optional[str] = None, all_browsers: bool = False) -> List[HistoryEntryDict]:
+
+    if time_period_in_days <= 0:
+        raise ValueError("time_period_in_days must be a positive integer")
+    
+    # Map browser types to their handler functions
+    browser_handlers = {
+        "firefox": get_firefox_history,
+        "chrome": get_chrome_history,
+        "safari": get_safari_history
+    }
+    
+    if all_browsers:
+        # Get history from all available browsers
+        all_entries = []
+        available_browsers = tool_detect_active_browser()
+        
+        if not available_browsers:
+            raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
+        
+        for browser in available_browsers:
+            try:
+                entries = browser_handlers[browser](time_period_in_days)
+                logger.info(f"Retrieved {len(entries)} {browser} history entries from last {time_period_in_days} days")
+                all_entries.extend([entry.to_dict() for entry in entries])
+            except Exception as e:
+                logger.warning(f"Failed to get {browser} history: {e}.  If the database is locked, please try closing the browser and running the tool again.")
+                continue
+        
+        if not all_entries:
+            raise RuntimeError("Failed to retrieve history from any browser. Try closing browsers - history is locked while browsers are running.")
+        
+        logger.info(f"Retrieved total of {len(all_entries)} history entries from all browsers")
+        return all_entries
+    
+    else:
+        # Single browser mode (original behavior)
+        if browser_type is None:
+            detected_browsers = tool_detect_active_browser()
+            if detected_browsers is None:
+                raise RuntimeError("This MCP currently only supports Firefox, Chrome, and Safari. Please ensure one of these browsers is installed and try again.")
+            
+            # If detect_active_browser returns a list, take the first available browser
+            if isinstance(detected_browsers, list):
+                browser_type = detected_browsers[0] if detected_browsers else None
+            else:
+                browser_type = detected_browsers
+                
+            if browser_type is None:
+                raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
+                
+            logger.info(f"Auto-detected active browser: {browser_type}")
+        
+        if browser_type not in browser_handlers:
+            raise ValueError(f"Unsupported browser type: {browser_type}. Supported types: {list(browser_handlers.keys())}")
+        
+        try:
+            entries = browser_handlers[browser_type](time_period_in_days)
+            logger.info(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
+
+            # Ensure we are always working with dictionaries
+            entries_dict = [ensure_history_entry_dict(e) for e in entries]
+
+            # Cache the history for later use
+            CACHED_HISTORY.add_history(entries_dict, time_period_in_days, browser_type)
+
+            return entries_dict
+        except sqlite3.Error as e:
+            logger.error(f"Error querying {browser_type} history: {e}")
+            raise RuntimeError(f"Failed to query {browser_type} history: {e}. Try closing the browser - history is locked while the browser is running.")
+        except Exception as e:
+            logger.error(f"Unexpected error querying {browser_type} history: {e}")
+            raise RuntimeError(f"Failed to query {browser_type} history: {e}")
+
+async def tool_search_browser_history(query: str, CACHED_HISTORY: CachedHistory) -> List[HistoryEntryDict]:
+    if not CACHED_HISTORY.has_history():
+        history = await tool_get_browser_history(7, CACHED_HISTORY, "", True)
+    else:
+        history = CACHED_HISTORY.get_history()
+    
+    query_lower = query.lower()
+    results = []
+    
+    for entry in history:
+        url = entry.get('url', '')
+        title = entry.get('title', '')
+        
+        # Handle None values safely
+        if (isinstance(url, str) and query_lower in url.lower()) or \
+           (isinstance(title, str) and query_lower in title.lower()):
+            results.append(entry)
+    
+    return results
+
+async def tool_test_browser_access() -> Dict[str, Any]:
+    """Quick test to see what's accessible"""
+    return {
+        "firefox": PATH_TO_FIREFOX_HISTORY is not None,
+        "chrome": PATH_TO_CHROME_HISTORY is not None,
+        "safari": PATH_TO_SAFARI_HISTORY is not None,
+        "message": "Run detect_active_browser for detailed status"
+    }

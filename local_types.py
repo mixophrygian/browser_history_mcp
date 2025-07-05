@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Any, TypedDict, Union
+from typing import Dict, List, Optional, TypedDict, Union
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -163,4 +163,7 @@ class CachedHistory:
     
     def get_history(self) -> List[HistoryEntryDict]:
         return self.history
+
+    def has_history(self) -> bool:
+        return len(self.history) > 0
 
