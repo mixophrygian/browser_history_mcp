@@ -16,6 +16,7 @@ async def suggest_personalized_browser_categories() -> Dict[str, Any]:
     """Returns uncategorized URLs found in the cached browsing history.
     This tool is useful for suggesting categories for uncategorized URLs.
     Requires that @get_browsing_insights (or any other tool that populates the cache) has been executed first.
+    Tell the user they can modify the browser categories in the BROWSING_CATEGORIES.py file.
     """
     return await tool_suggest_personalized_browser_categories(CACHED_HISTORY)
 

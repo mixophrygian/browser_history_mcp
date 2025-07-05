@@ -65,15 +65,27 @@ uv run mcp install server.py --name "Browser History MCP"
 
 ## Usage
 
-The server provides several tools for analyzing browser history:
+The server provides several tools and prompts for analyzing browser history:
 
-- `get_browser_history`: Retrieve history entries for a time period
-- `detect_active_browser`: Tries to guess your preferred browser by seeing which one is currently active.  
-- `group_browsing_history_into_sessions`: Group visits into sessions
-- `categorize_browsing_history`: Categorize websites by type
-- `analyze_domain_frequency`: Find most visited domains
-- `find_learning_paths`: Identify learning patterns
-- `calculate_productivity_metrics`: Calculate productivity ratios
+### Core Tools
+
+- `detect_active_browser`: Detects which browser is currently active and provides recommendations for accessing history
+- `get_browsing_insights`: Comprehensive analysis tool that retrieves history and performs multiple analyses in one call
+- `analyze_browsing_sessions`: Group visits into sessions with time patterns, categories, and metrics
+- `search_browser_history`: Search through cached browser history for specific queries
+- `suggest_personalized_browser_categories`: Returns uncategorized URLs for custom categorization
+- `test_browser_access`: Quick test to see what browser databases are accessible
+- `diagnose_safari_support`: Diagnose Safari support and accessibility for debugging
+
+### Analysis Prompts
+
+- `productivity_analysis`: Creates a comprehensive productivity analysis prompt
+- `learning_analysis`: Creates a deep learning pattern analysis prompt  
+- `research_topic_extraction`: Extract and summarize research topics from browsing history
+
+### Browser Support
+
+The server supports Firefox, Chrome, and Safari browser history analysis. Note that browsers must be closed to access their history databases.
 
 ## Privacy
 
