@@ -140,6 +140,15 @@ class CachedHistoryMetadata(TypedDict):
     browser_type: str
     entry_count: int
 
+class BrowserHistoryResult(TypedDict):
+    """Type for browser history retrieval result with partial success handling"""
+    history_entries: List[HistoryEntryDict]
+    successful_browsers: List[str]
+    failed_browsers: List[str]
+    failure_reasons: Dict[str, str]
+    total_entries: int
+    recommendation: str
+
 @dataclass
 class CachedHistory:
     history: List[HistoryEntryDict]
