@@ -4,23 +4,27 @@ PRODUCTIVITY_ANALYSIS_PROMPT = """
     The MCP tool @get_browsing_insights will be used to get the browser history and insights.
         
     Then provide:
+
+    1. **Browsers Available**
+       - List the browsers that you were able to retrieve history from.
+       - If you were unable to retrieve history from a browser that was detected, explain why, and note that it probably contains history that is worth considering..
     
-    1. **Time Distribution Analysis**
+    2. **Time Distribution Analysis**
        - Calculate percentage of time on work-related vs entertainment sites
        - Identify peak productivity hours based on work-site visits
        - Show time spent per domain/category
     
-    2. **Session Pattern Recognition**
+    3. **Session Pattern Recognition**
        - Group visits into sessions (max 2-hour gaps between visits)
        - Identify "rabbit hole" sessions (many related searches in sequence)
        - Flag sessions that started productive but drifted
     
-    3. **Focus Metrics**
+   4. **Focus Metrics**
        - Average session duration on productive sites
        - Number of context switches between work and entertainment
        - Longest uninterrupted work sessions
     
-    4. **Actionable Recommendations**
+   5. **Actionable Recommendations**
        - Top 3 time-sink websites to consider blocking
        - Optimal work hours based on historical patterns
        - Specific habits to change (e.g., "You check Reddit 15x/day on average")

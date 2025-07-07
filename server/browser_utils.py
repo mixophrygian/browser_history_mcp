@@ -415,10 +415,10 @@ def tool_detect_available_browsers() -> Dict[str, Any]:
             # Try to connect with read-only mode
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             conn.close()
-            logger.info(f"Successfully connected to {browser_name} database - browser is likely closed")
+            logger.info(f"Successfully connected to {browser_name} database.  Browser may still be running, encourage the user to close this browser to make history available.")
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e).lower():
-                logger.info(f"Database locked for {browser_name} - browser is likely open and active")
+                logger.info(f"Database locked for {browser_name} - browser is likely open and active - prompt the user to close it to get complete history.")
                 browsers_in_use.append(browser_name)
             else:
                 logger.warning(f"Error connecting to {browser_name} database: {e}")
