@@ -100,6 +100,16 @@ CHROME_PROFILE_DIR = "/path/to/your/chrome/profile"
 
 ## 🎯 Usage
 
+### Recommended Workflow
+
+1. **Health Check**: `health_check` - Verify the MCP server is working
+2. **Browser Status**: `check_browser_status` - See which browsers are available/locked
+3. **Get Data**: `get_browser_history` - Retrieve raw browser history data
+4. **Analyze**: `analyze_browser_history` - Choose analysis level:
+   - `analysis_type="quick_summary"` - Basic stats (fastest)
+   - `analysis_type="basic"` - Domain analysis and categorization
+   - `analysis_type="comprehensive"` - Full analysis with sessions (default)
+
 ### Development Mode
 
 ```bash
@@ -120,12 +130,12 @@ uv run mcp install server/main.py --name "Browser History MCP"
 
 | Tool | Description | Use Case |
 |------|-------------|----------|
-| `detect_active_browser` | Detects active browsers and provides access recommendations | Initial setup and troubleshooting |
-| `get_browsing_insights` | Comprehensive analysis with multiple insights in one call | Full productivity analysis |
-| `analyze_browsing_sessions` | Groups visits into sessions with patterns and metrics | Session-based analysis |
-| `search_browser_history` | Search cached history for specific queries | Targeted research |
-| `suggest_personalized_browser_categories` | Returns uncategorized URLs for custom categorization | Data organization |
-| `test_browser_access` | Quick test for database accessibility | Troubleshooting |
+| `health_check` | Simple health check to test if the MCP server is working | Initial testing |
+| `check_browser_status` | Step 1: Check which browsers are available and which are locked | Initial setup and troubleshooting |
+| `get_browser_history` | Step 2: Get raw browser history data without analysis (fastest) | Quick data retrieval |
+| `analyze_browser_history` | Step 3: Main analysis tool with options for quick_summary, basic, or comprehensive analysis | Full productivity analysis |
+| `search_browser_history` | Search browser history for specific queries | Targeted research |
+| `suggest_categories` | Get uncategorized URLs for custom categorization | Data organization |
 | `diagnose_safari_support` | Safari support and accessibility diagnostics | Safari-specific issues |
 
 ### Analysis Prompts

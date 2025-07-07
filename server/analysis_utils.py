@@ -1,7 +1,8 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 from collections import defaultdict, Counter
 import re
+import time
 from datetime import datetime
 
 from local_types import HistoryEntryDict, CategoryEntry, ensure_history_entry_dict, EnrichedSession, DomainStat, LearningPath, ProductivityMetrics, CachedHistory, BrowserInsightsOutput
@@ -29,6 +30,9 @@ async def categorize_browsing_history(history_data: List[HistoryEntryDict]) -> D
     Args:
         history_data: List of history entries from get_browser_history
     """
+    
+    cat_start = time.time()
+    print(f"📊 Categorization: Processing {len(history_data)} entries")
     
     categorized = defaultdict(lambda: {
         'entries': [],
@@ -78,6 +82,9 @@ async def categorize_browsing_history(history_data: List[HistoryEntryDict]) -> D
             'subcategories': {} # no subcategories for uncategorized
         }
    
+    cat_time = time.time() - cat_start
+    print(f"📊 Categorization: Completed in {cat_time:.3f}s, categorized {len(categorized)} categories")
+    
     return dict(categorized)
 
 
@@ -229,9 +236,15 @@ async def tool_analyze_browsing_sessions(history_data: List[HistoryEntryDict], m
     if not history_data:
         return []
     
+    session_start = time.time()
+    
+    # Limit to first 500 entries for faster processing
+    limited_data = history_data[:500] if len(history_data) > 500 else history_data
+    print(f"📊 Session Analysis: Processing {len(limited_data)} entries from {len(history_data)} total")
+    
     # First, categorize all entries for lookup
     categorized_lookup = {}
-    for entry in history_data:
+    for entry in limited_data:
         url = entry['url'].lower()
         domain = urlparse(url).netloc.lower()
         
@@ -244,7 +257,7 @@ async def tool_analyze_browsing_sessions(history_data: List[HistoryEntryDict], m
                 break
     
     # Sort by timestamp
-    sorted_history = sorted(history_data, key=lambda x: x['last_visit_time'])
+    sorted_history = sorted(limited_data, key=lambda x: x['last_visit_time'])
     
     sessions = []
     current_session = []
@@ -268,6 +281,9 @@ async def tool_analyze_browsing_sessions(history_data: List[HistoryEntryDict], m
     # Don't forget the last session
     if current_session:
         sessions.append(_enrich_session(current_session, categorized_lookup))
+    
+    session_time = time.time() - session_start
+    print(f"📊 Session Analysis: Completed in {session_time:.3f}s, created {len(sessions)} sessions")
     
     return sessions
 
@@ -531,14 +547,135 @@ def analyze_focus_patterns(sessions: List[EnrichedSession]) -> str:
             focus_patterns[session['time_patterns']['time_period']].append(session['duration_minutes'])
     return f"Focus patterns summary: {dict(focus_patterns)}"
 
-async def tool_get_browsing_insights(time_period_in_days: int, CACHED_HISTORY: CachedHistory) -> BrowserInsightsOutput:
-    # check if CACHED_HISTORY has history for the given time period and browser type
-    if CACHED_HISTORY.metadata['time_period_days'] == time_period_in_days and CACHED_HISTORY.metadata['browser_type'] == "":
-        return CACHED_HISTORY.get_history()
+async def tool_get_browsing_insights(time_period_in_days: int, CACHED_HISTORY: CachedHistory, fast_mode: bool = True) -> BrowserInsightsOutput:
+    start_time = time.time()
+    benchmarks = {}
     
-    history = await tool_get_browser_history(time_period_in_days, CACHED_HISTORY, "", True)
-    # Use the new enriched session analysis
-    enriched_sessions = await tool_analyze_browsing_sessions(history)
+    # Step 1: Get history data
+    step_start = time.time()
+    if CACHED_HISTORY.metadata['time_period_days'] == time_period_in_days and CACHED_HISTORY.metadata['browser_type'] == "":
+        history = CACHED_HISTORY.get_history()
+        benchmarks["history_retrieval"] = time.time() - step_start
+        print(f"📊 Benchmark: History retrieval (cached): {benchmarks['history_retrieval']:.3f}s")
+    else:
+        history_result = await tool_get_browser_history(time_period_in_days, CACHED_HISTORY, "", True)
+        # Handle the new return type from tool_get_browser_history
+        if isinstance(history_result, dict) and "history_entries" in history_result:
+            history = history_result["history_entries"]
+            # Log browser status for user awareness
+            if history_result.get("failed_browsers"):
+                print(f"⚠️  Some browsers failed: {history_result['failed_browsers']}. {history_result.get('recommendation', '')}")
+        else:
+            history = history_result  # Fallback for single browser mode
+        benchmarks["history_retrieval"] = time.time() - step_start
+        print(f"📊 Benchmark: History retrieval (fresh): {benchmarks['history_retrieval']:.3f}s")
+    
+    print(f"📊 Benchmark: History entries: {len(history)}")
+    
+    # Step 2: Limit history size for faster processing if fast_mode is enabled
+    step_start = time.time()
+    if fast_mode and len(history) > 1000:
+        limited_history = history[:1000]
+        performance_note = f"Analysis based on first 1000 entries from {len(history)} total entries for faster processing"
+    else:
+        limited_history = history
+        performance_note = None
+    benchmarks["data_limiting"] = time.time() - step_start
+    print(f"📊 Benchmark: Data limiting: {benchmarks['data_limiting']:.3f}s")
+    
+    # Step 3: Session analysis (most likely bottleneck)
+    step_start = time.time()
+    enriched_sessions = await tool_analyze_browsing_sessions(limited_history)
+    benchmarks["session_analysis"] = time.time() - step_start
+    print(f"📊 Benchmark: Session analysis: {benchmarks['session_analysis']:.3f}s")
+    print(f"📊 Benchmark: Sessions created: {len(enriched_sessions)}")
+    
+    # Step 4: Generate session insights
+    step_start = time.time()
+    session_insights = {
+        'total_sessions': len(enriched_sessions),
+        'avg_session_duration': sum(s['duration_minutes'] for s in enriched_sessions) / len(enriched_sessions) if enriched_sessions else 0,
+        'session_types': Counter(s['session_type'] for s in enriched_sessions),
+        'time_period_distribution': Counter(s['time_patterns']['time_period'] for s in enriched_sessions),
+        'productive_sessions': sum(1 for s in enriched_sessions if s['characteristics']['is_productive']),
+        'rabbit_holes': [s for s in enriched_sessions if s['characteristics']['is_rabbit_hole']],
+        'research_sessions': [s for s in enriched_sessions if s['characteristics']['is_research']],
+        'weekend_vs_weekday': {
+            'weekend': [s for s in enriched_sessions if s['time_patterns']['is_weekend']],
+            'weekday': [s for s in enriched_sessions if not s['time_patterns']['is_weekend']]
+        }
+    }
+    benchmarks["session_insights"] = time.time() - step_start
+    print(f"📊 Benchmark: Session insights generation: {benchmarks['session_insights']:.3f}s")
+    
+    # Step 5: Categorization
+    step_start = time.time()
+    categorized_data = await categorize_browsing_history(limited_history)
+    benchmarks["categorization"] = time.time() - step_start
+    print(f"📊 Benchmark: Categorization: {benchmarks['categorization']:.3f}s")
+    
+    # Step 6: Domain analysis
+    step_start = time.time()
+    domain_stats = await analyze_domain_frequency(limited_history, top_n=10)  # Reduce from 20 to 10
+    benchmarks["domain_analysis"] = time.time() - step_start
+    print(f"📊 Benchmark: Domain analysis: {benchmarks['domain_analysis']:.3f}s")
+    
+    # Step 7: Learning paths
+    step_start = time.time()
+    learning_paths = await find_learning_paths(limited_history)
+    benchmarks["learning_paths"] = time.time() - step_start
+    print(f"📊 Benchmark: Learning paths: {benchmarks['learning_paths']:.3f}s")
+    
+    # Step 8: Productivity metrics
+    step_start = time.time()
+    productivity_metrics = await calculate_productivity_metrics(categorized_data)
+    benchmarks["productivity_metrics"] = time.time() - step_start
+    print(f"📊 Benchmark: Productivity metrics: {benchmarks['productivity_metrics']:.3f}s")
+    
+    # Step 9: Report helpers
+    step_start = time.time()
+    report_helpers = {
+        # Pre-formatted insights for easy report generation
+        "typical_session": describe_typical_session(enriched_sessions),
+        "productivity_summary": generate_productivity_summary(enriched_sessions),
+        "time_habits": describe_time_habits(enriched_sessions),
+        "focus_analysis": analyze_focus_patterns(enriched_sessions)
+    }
+    benchmarks["report_helpers"] = time.time() - step_start
+    print(f"📊 Benchmark: Report helpers: {benchmarks['report_helpers']:.3f}s")
+    
+    # Total time
+    total_time = time.time() - start_time
+    benchmarks["total_time"] = total_time
+    print(f"📊 Benchmark: TOTAL TIME: {total_time:.3f}s")
+    
+    # Performance summary
+    print("\n📊 PERFORMANCE SUMMARY:")
+    sorted_benchmarks = sorted(benchmarks.items(), key=lambda x: x[1], reverse=True)
+    for step, duration in sorted_benchmarks:
+        if step != "total_time":
+            percentage = (duration / total_time) * 100
+            print(f"  {step}: {duration:.3f}s ({percentage:.1f}%)")
+    
+    new_history = {
+            "enriched_sessions": enriched_sessions,  # The new comprehensive sessions
+            "session_insights": session_insights,     # Aggregated insights
+            "categorized_data": categorized_data,
+            "domain_stats": domain_stats,
+            "learning_paths": learning_paths,
+            "productivity_metrics": productivity_metrics,
+            "report_helpers": report_helpers,
+            "benchmarks": benchmarks  # Include benchmarks in output
+        }  # type: BrowserInsightsOutput
+    
+    # Cache the history for future use
+    CACHED_HISTORY.add_history(history, time_period_in_days, "")
+    
+    # Add performance note if we limited the data
+    if performance_note:
+        new_history["performance_note"] = performance_note
+    
+    return new_history
     
     # Generate session-based insights
     session_insights = {
@@ -554,10 +691,18 @@ async def tool_get_browsing_insights(time_period_in_days: int, CACHED_HISTORY: C
             'weekday': [s for s in enriched_sessions if not s['time_patterns']['is_weekend']]
         }
     }
-        # Still include other analyses for comprehensive view
-    categorized_data = await categorize_browsing_history(history)
-    domain_stats = await analyze_domain_frequency(history)
-    learning_paths = await find_learning_paths(history)
+        # Limit history size for faster processing if fast_mode is enabled
+    if fast_mode and len(history) > 1000:
+        limited_history = history[:1000]
+        performance_note = f"Analysis based on first 1000 entries from {len(history)} total entries for faster processing"
+    else:
+        limited_history = history
+        performance_note = None
+    
+    # Still include other analyses for comprehensive view
+    categorized_data = await categorize_browsing_history(limited_history)
+    domain_stats = await analyze_domain_frequency(limited_history, top_n=10)  # Reduce from 20 to 10
+    learning_paths = await find_learning_paths(limited_history)
     productivity_metrics = await calculate_productivity_metrics(categorized_data)
     
     new_history = {
@@ -575,7 +720,14 @@ async def tool_get_browsing_insights(time_period_in_days: int, CACHED_HISTORY: C
                 "focus_analysis": analyze_focus_patterns(enriched_sessions)
             }
         }  # type: BrowserInsightsOutput
+    
+    # Cache the history for future use
     CACHED_HISTORY.add_history(history, time_period_in_days, "")
+    
+    # Add performance note if we limited the data
+    if performance_note:
+        new_history["performance_note"] = performance_note
+    
     return new_history
 
 async def tool_suggest_personalized_browser_categories(CACHED_HISTORY: CachedHistory) -> List[str]:
@@ -594,3 +746,67 @@ async def tool_suggest_personalized_browser_categories(CACHED_HISTORY: CachedHis
     new_categories = [e["url"] for e in uncategorized_entries]
 
     return {"URLs without categories": new_categories}
+
+async def tool_get_quick_insights(time_period_in_days: int, CACHED_HISTORY: CachedHistory) -> Dict[str, Any]:
+    """Get quick browser history insights with minimal processing for fast results."""
+    
+    # Get history data
+    if CACHED_HISTORY.metadata['time_period_days'] == time_period_in_days and CACHED_HISTORY.metadata['browser_type'] == "":
+        history = CACHED_HISTORY.get_history()
+    else:
+        history_result = await tool_get_browser_history(time_period_in_days, CACHED_HISTORY, "", True)
+        if isinstance(history_result, dict) and "history_entries" in history_result:
+            history = history_result["history_entries"]
+            browser_status = history_result
+        else:
+            history = history_result
+            browser_status = None
+    
+    if not history:
+        return {"error": "No history data available"}
+    
+    # Limit to first 500 entries for speed
+    limited_history = history[:500] if len(history) > 500 else history
+    
+    # Basic statistics
+    total_entries = len(limited_history)
+    unique_domains = len(set(urlparse(entry['url']).netloc for entry in limited_history))
+    
+    # Top domains (simple count)
+    domain_counts = {}
+    for entry in limited_history:
+        domain = urlparse(entry['url']).netloc
+        domain_counts[domain] = domain_counts.get(domain, 0) + 1
+    
+    top_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    
+    # Basic categorization (simplified)
+    categories = {"work": 0, "social": 0, "entertainment": 0, "other": 0}
+    for entry in limited_history:
+        url = entry['url'].lower()
+        domain = urlparse(url).netloc.lower()
+        
+        if any(d in domain for d in ['github.com', 'stackoverflow.com', 'docs.', 'api.']):
+            categories["work"] += 1
+        elif any(d in domain for d in ['facebook.com', 'twitter.com', 'instagram.com', 'reddit.com']):
+            categories["social"] += 1
+        elif any(d in domain for d in ['youtube.com', 'netflix.com', 'spotify.com']):
+            categories["entertainment"] += 1
+        else:
+            categories["other"] += 1
+    
+    result = {
+        "total_entries": total_entries,
+        "unique_domains": unique_domains,
+        "top_domains": top_domains,
+        "category_breakdown": categories,
+        "time_period_days": time_period_in_days,
+        "processing_note": f"Quick analysis of first {len(limited_history)} entries from {len(history)} total entries"
+    }
+    
+    # Add browser status if available
+    if browser_status and browser_status.get("failed_browsers"):
+        result["browser_status"] = browser_status
+    
+    return result
+

@@ -25,28 +25,28 @@
   },
   "tools": [
     {
-      "name": "detect_active_browser",
-      "description": "Detects active browsers and provides access recommendations"
+      "name": "health_check",
+      "description": "Simple health check to test if the MCP server is working"
     },
     {
-      "name": "get_browsing_insights",
-      "description": "Comprehensive analysis with multiple insights in one call"
+      "name": "check_browser_status",
+      "description": "Step 1: Check which browsers are available and which are locked"
     },
     {
-      "name": "analyze_browsing_sessions",
-      "description": "Groups visits into sessions with patterns and metrics"
+      "name": "get_browser_history",
+      "description": "Step 2: Get raw browser history data without analysis (fastest option)"
+    },
+    {
+      "name": "analyze_browser_history",
+      "description": "Step 3: Main analysis tool with options for quick_summary, basic, or comprehensive analysis"
     },
     {
       "name": "search_browser_history",
-      "description": "Search cached history for specific queries"
+      "description": "Search browser history for specific queries"
     },
     {
-      "name": "suggest_personalized_browser_categories",
-      "description": "Returns uncategorized URLs for custom categorization"
-    },
-    {
-      "name": "test_browser_access",
-      "description": "Quick test for database accessibility"
+      "name": "suggest_categories",
+      "description": "Get uncategorized URLs for custom categorization"
     },
     {
       "name": "diagnose_safari_support",

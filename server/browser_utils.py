@@ -1,5 +1,6 @@
 import os
 import platform
+import time
 from typing import Optional, List, Dict, Any, Union
 import sqlite3
 import glob
@@ -35,7 +36,7 @@ def get_firefox_profile_path() -> Optional[str]:
         if matches:
             # Return the first match (usually there's only one default profile)
             profile_path = matches[0]
-            logger.info(f"Found Firefox profile: {profile_path}")
+            logger.warning(f"Found Firefox profile: {profile_path}")
             return profile_path
     
     logger.warning(f"No default Firefox profile found in: {base_path}")
@@ -56,11 +57,15 @@ def get_firefox_history_path() -> Optional[str]:
 
 def get_firefox_history(days: int) -> List[HistoryEntry]:
     """Get Firefox history from the last N days"""
-        # Check if database exists
+    firefox_start = time.time()
+    print(f"📊 Firefox: Starting history retrieval for {days} days...")
+    
+    # Check if database exists
     if not os.path.exists(PATH_TO_FIREFOX_HISTORY):
         raise RuntimeError(f"Firefox history not found at {PATH_TO_FIREFOX_HISTORY}")
     
     # Connect to the database
+    print(f"📊 Firefox: Connecting to database...")
     conn = sqlite3.connect(f"file:{PATH_TO_FIREFOX_HISTORY}?mode=ro", uri=True)
     try:
         cursor = conn.cursor()
@@ -92,8 +97,12 @@ def get_firefox_history(days: int) -> List[HistoryEntry]:
                 last_visit_time=visit_time
             ))
         
+        firefox_time = time.time() - firefox_start
+        print(f"📊 Firefox: History retrieval completed in {firefox_time:.3f}s: {len(entries)} entries")
         return entries
     except Exception as e:
+        firefox_time = time.time() - firefox_start
+        print(f"❌ Firefox: History retrieval failed in {firefox_time:.3f}s: {e}")
         logger.error(f"Error querying Firefox history: {e}")
         raise RuntimeError(f"Failed to query Firefox history: {e}")
     finally:
@@ -122,7 +131,7 @@ def get_chrome_profile_path() -> Optional[str]:
     # Chrome typically uses "Default" as the main profile directory
     profile_path = os.path.join(base_path, "Default")
     if os.path.exists(profile_path):
-        logger.info(f"Found Chrome profile: {profile_path}")
+        logger.warning(f"Found Chrome profile: {profile_path}")
         return profile_path
     
     logger.warning(f"Chrome Default profile not found in: {base_path}")
@@ -144,10 +153,14 @@ def get_chrome_history_path() -> Optional[str]:
 
 def get_chrome_history(days: int) -> List[HistoryEntry]:
     """Get Chrome history from the last N days"""
+    chrome_start = time.time()
+    print(f"📊 Chrome: Starting history retrieval for {days} days...")
+    
     if not os.path.exists(PATH_TO_CHROME_HISTORY):
         raise RuntimeError(f"Chrome history not found at {PATH_TO_CHROME_HISTORY}")
     
     # Connect to the database
+    print(f"📊 Chrome: Connecting to database...")
     conn = sqlite3.connect(f"file:{PATH_TO_CHROME_HISTORY}?mode=ro", uri=True)
 
     try: 
@@ -184,8 +197,12 @@ def get_chrome_history(days: int) -> List[HistoryEntry]:
                 last_visit_time=visit_time
             ))
         
+        chrome_time = time.time() - chrome_start
+        print(f"📊 Chrome: History retrieval completed in {chrome_time:.3f}s: {len(entries)} entries")
         return entries
     except Exception as e:
+        chrome_time = time.time() - chrome_start
+        print(f"❌ Chrome: History retrieval failed in {chrome_time:.3f}s: {e}")
         logger.error(f"Error querying Chrome history: {e}")
         raise RuntimeError(f"Failed to query Chrome history: {e}")
     finally:
@@ -213,7 +230,7 @@ def get_safari_profile_path() -> Optional[str]:
         logger.warning(f"Safari profiles directory not found at: {base_path}")
         return None
     
-    logger.info(f"Found Safari profile: {base_path}")
+    logger.warning(f"Found Safari profile: {base_path}")
     return base_path
 
 def get_safari_history_path() -> Optional[str]:
@@ -245,7 +262,7 @@ def get_safari_history_path() -> Optional[str]:
     
     for history_path in possible_paths:
         if os.path.exists(history_path):
-            logger.info(f"Found Safari database at: {history_path}")
+            logger.warning(f"Found Safari database at: {history_path}")
             return history_path
     
     logger.warning(f"No Safari history database found in: {profile_path}")
@@ -276,7 +293,7 @@ def get_safari_history(days: int) -> List[HistoryEntry]:
         # First, let's see what tables are available
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = [row[0] for row in cursor.fetchall()]
-        logger.info(f"Available tables in Safari database: {tables}")
+        logger.warning(f"Available tables in Safari database: {tables}")
         
         # Safari stores timestamps as seconds since Unix epoch
         cutoff_time = (datetime.now() - timedelta(days=days)).timestamp()
@@ -406,11 +423,18 @@ def tool_detect_available_browsers() -> Dict[str, Any]:
     
     if not browsers_to_check:
         logger.warning("No browser history databases found")
-        return None
+        return {
+            "available_browsers": [],
+            "active_browsers": [],
+            "status": "error",
+            "error_message": "No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed.",
+            "user_action_required": False,
+            "recommended_action": "Install Firefox, Chrome, or Safari to use this tool"
+        }
     
     browsers_in_use = []
     for browser_name, db_path in browsers_to_check:
-        logger.info(f"Checking {browser_name} database at {db_path}")
+        logger.warning(f"Checking {browser_name} database at {db_path}")
         try:
             # Try to connect with read-only mode
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -421,31 +445,45 @@ def tool_detect_available_browsers() -> Dict[str, Any]:
             table_count = cursor.fetchone()[0]
             conn.close()
             
-            logger.info(f"Successfully connected to {browser_name} database and queried {table_count} tables. Browser may still be running, encourage the user to close this browser to make history available.")
+            logger.warning(f"Successfully connected to {browser_name} database and queried {table_count} tables. Browser may still be running, encourage the user to close this browser to make history available.")
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e).lower():
-                logger.info(f"Database locked for {browser_name} - browser is likely open and active - prompt the user to close it to get complete history.")
-                browsers_in_use.append(browser_name)
+                logger.warning(f"Database locked for {browser_name} - browser is likely open and active - prompt the user to close it to get complete history.")
+                # Short-circuit: return immediately if any browser is locked
+                return {
+                    "available_browsers": [browser[0] for browser in browsers_to_check],
+                    "active_browsers": [browser_name],
+                    "status": "browser_locked",
+                    "error_message": f"🔒 BROWSER LOCKED: {browser_name.title()} is currently running and its database is locked.",
+                    "user_action_required": True,
+                    "recommended_action": f"❗ IMPORTANT: Please close {browser_name.title()} completely to analyze its history. You can restore your tabs later with Ctrl+Shift+T (Cmd+Shift+T on Mac).",
+                    "technical_details": f"Database error: {str(e)}"
+                }
             else:
                 logger.warning(f"Error connecting to {browser_name} database: {e} - please inform the user that this browser is not available for analysis.")
         except Exception as e:
             logger.warning(f"Unexpected error connecting to {browser_name} database: {e}")
-            browsers_in_use.append(browser_name)
+            # Short-circuit: return immediately if any browser has an error
+            return {
+                "available_browsers": [browser[0] for browser in browsers_to_check],
+                "active_browsers": [browser_name],
+                "status": "error",
+                "error_message": f"❌ ERROR: Cannot access {browser_name.title()} database.",
+                "user_action_required": True,
+                "recommended_action": f"Please close {browser_name.title()} completely and try again. You can restore your tabs later with Ctrl+Shift+T (Cmd+Shift+T on Mac).",
+                "technical_details": f"Technical error: {str(e)}"
+            }
     
-    # If no browser is locked, return all available browsers
-    if not browsers_in_use and browsers_to_check:
-        available_browsers = [browser[0] for browser in browsers_to_check]
-        logger.info(f"No active browser detected, available browsers: {available_browsers}")
-        return {
-            "available_browsers": available_browsers,
-            "active_browsers": [],
-            "recommended_action": "Please close all browsers to analyze history. You can restore tabs with Ctrl+Shift+T"
-        }
-    
+    # If we get here, no browsers are locked
+    available_browsers = [browser[0] for browser in browsers_to_check]
+    logger.warning(f"No active browser detected, available browsers: {available_browsers}")
     return {
-        "available_browsers": [browser[0] for browser in browsers_to_check],
-        "active_browsers": browsers_in_use,  # Currently running
-        "recommended_action": "Please close the browser to analyze its history. You can restore tabs with Ctrl+Shift+T"
+        "available_browsers": available_browsers,
+        "active_browsers": [],
+        "status": "ready",
+        "error_message": None,
+        "user_action_required": False,
+        "recommended_action": f"✅ All browsers are available for analysis. Found: {', '.join(available_browsers)}"
     }
 
 PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
@@ -453,6 +491,9 @@ PATH_TO_CHROME_HISTORY = get_chrome_history_path()
 PATH_TO_SAFARI_HISTORY = get_safari_history_path()
 
 async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: CachedHistory, browser_type: Optional[str] = None, all_browsers: bool = True) -> Union[List[HistoryEntryDict], BrowserHistoryResult]:
+
+    start_time = time.time()
+    print(f"🚀 Starting browser history retrieval for {time_period_in_days} days...")
 
     if time_period_in_days <= 0:
         raise ValueError("time_period_in_days must be a positive integer")
@@ -465,33 +506,57 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
     }
     
     if all_browsers:
-        # Get history from all available browsers
+        # Step 1: Detect available browsers
+        step_start = time.time()
+        print("📊 Step 1: Detecting available browsers...")
+        browser_status = tool_detect_available_browsers()
+        detect_time = time.time() - step_start
+        print(f"📊 Browser detection completed in {detect_time:.3f}s")
+        
+        if browser_status.get("status") == "error":
+            print(f"❌ {browser_status['error_message']}")
+            raise RuntimeError(browser_status['error_message'])
+        elif browser_status.get("status") == "browser_locked":
+            print(f"❌ {browser_status['error_message']}")
+            raise RuntimeError(browser_status['error_message'])
+        
+        available_browsers = browser_status.get('available_browsers', [])
+        if not available_browsers:
+            print("❌ No available browsers found")
+            raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
+        
+        print(f"📊 Available browsers: {available_browsers}")
+        
+        # Step 2: Get history from each browser
         all_entries = []
         successful_browsers = []
         failed_browsers = []
         failure_reasons = {}
         
-        browser_status = tool_detect_available_browsers()
-        
-        if not browser_status:
-            raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
-        
-        available_browsers = browser_status.get('available_browsers', [])
-        if not available_browsers:
-            raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
-        
         for browser in available_browsers:
+            browser_start = time.time()
+            print(f"📊 Step 2.{len(successful_browsers) + len(failed_browsers) + 1}: Getting {browser} history...")
+            
             try:
                 entries = browser_handlers[browser](time_period_in_days)
-                logger.info(f"Retrieved {len(entries)} {browser} history entries from last {time_period_in_days} days")
+                browser_time = time.time() - browser_start
+                print(f"📊 {browser} history retrieved in {browser_time:.3f}s: {len(entries)} entries")
+                
+                logger.warning(f"Retrieved {len(entries)} {browser} history entries from last {time_period_in_days} days")
                 all_entries.extend([entry.to_dict() for entry in entries])
                 successful_browsers.append(browser)
             except Exception as e:
+                browser_time = time.time() - browser_start
                 error_msg = str(e)
+                print(f"❌ {browser} history failed in {browser_time:.3f}s: {error_msg}")
+                
                 logger.warning(f"Failed to get {browser} history: {error_msg}. If the database is locked, please try closing the browser and running the tool again.")
                 failed_browsers.append(browser)
                 failure_reasons[browser] = error_msg
                 continue
+        
+        total_time = time.time() - start_time
+        print(f"📊 Total browser history retrieval time: {total_time:.3f}s")
         
         # If we have any successful browsers, return partial results
         if successful_browsers:
@@ -499,12 +564,12 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
             if failed_browsers:
                 locked_browsers = [browser for browser in failed_browsers if "database is locked" in failure_reasons.get(browser, "").lower()]
                 if locked_browsers:
-                    recommendation = f"Some browsers ({', '.join(locked_browsers)}) are currently open and their databases are locked. Close these browsers and retry to get complete history. "
-                recommendation += f"Successfully retrieved {len(all_entries)} entries from {', '.join(successful_browsers)}."
+                    recommendation = f"🔒 BROWSER LOCKED: {', '.join([b.title() for b in locked_browsers])} {'is' if len(locked_browsers) == 1 else 'are'} currently running. Please close {'this browser' if len(locked_browsers) == 1 else 'these browsers'} completely to get complete history analysis. You can restore tabs with Ctrl+Shift+T (Cmd+Shift+T on Mac). "
+                recommendation += f"Successfully retrieved {len(all_entries)} entries from {', '.join([b.title() for b in successful_browsers])}."
             else:
-                recommendation = f"Successfully retrieved {len(all_entries)} entries from all browsers."
+                recommendation = f"✅ Successfully retrieved {len(all_entries)} entries from all browsers: {', '.join([b.title() for b in successful_browsers])}."
             
-            logger.info(f"Retrieved total of {len(all_entries)} history entries from {len(successful_browsers)} browsers")
+            logger.warning(f"Retrieved total of {len(all_entries)} history entries from {len(successful_browsers)} browsers")
             
             return {
                 "history_entries": all_entries,
@@ -512,19 +577,29 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
                 "failed_browsers": failed_browsers,
                 "failure_reasons": failure_reasons,
                 "total_entries": len(all_entries),
+                "status": "partial_success" if failed_browsers else "success",
+                "user_action_required": bool(failed_browsers),
                 "recommendation": recommendation
             }
         
         # If no browsers succeeded, raise error with detailed information
-        error_details = "; ".join([f"{browser}: {reason}" for browser, reason in failure_reasons.items()])
-        raise RuntimeError(f"Failed to retrieve history from any browser: {error_details}. Try closing browsers - history is locked while browsers are running.")
+        locked_browsers = [browser for browser in failed_browsers if "database is locked" in failure_reasons.get(browser, "").lower()]
+        if locked_browsers:
+            error_message = f"🔒 BROWSER LOCKED: All browsers ({', '.join([b.title() for b in locked_browsers])}) are currently running and their databases are locked. Please close ALL browsers completely to analyze history. You can restore tabs with Ctrl+Shift+T (Cmd+Shift+T on Mac)."
+        else:
+            error_details = "; ".join([f"{browser}: {reason}" for browser, reason in failure_reasons.items()])
+            error_message = f"❌ ERROR: Failed to retrieve history from any browser: {error_details}"
+        
+        raise RuntimeError(error_message)
     
     else:
         # Single browser mode (original behavior)
         if browser_type is None:
             browser_status = tool_detect_available_browsers()
-            if browser_status is None:
-                raise RuntimeError("This MCP currently only supports Firefox, Chrome, and Safari. Please ensure one of these browsers is installed and try again.")
+            if browser_status.get("status") == "error":
+                raise RuntimeError(browser_status['error_message'])
+            elif browser_status.get("status") == "browser_locked":
+                raise RuntimeError(browser_status['error_message'])
             
             # Get the first available browser from the available_browsers list
             available_browsers = browser_status.get('available_browsers', [])
@@ -533,14 +608,14 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
             if browser_type is None:
                 raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
                 
-            logger.info(f"Auto-detected active browser: {browser_type}")
+            logger.warning(f"Auto-detected active browser: {browser_type}")
         
         if browser_type not in browser_handlers:
             raise ValueError(f"Unsupported browser type: {browser_type}. Supported types: {list(browser_handlers.keys())}")
         
         try:
             entries = browser_handlers[browser_type](time_period_in_days)
-            logger.info(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
+            logger.warning(f"Retrieved {len(entries)} {browser_type} history entries from last {time_period_in_days} days")
 
             # Ensure we are always working with dictionaries
             entries_dict = [ensure_history_entry_dict(e) for e in entries]
@@ -551,19 +626,17 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
             return entries_dict
         except sqlite3.Error as e:
             logger.error(f"Error querying {browser_type} history: {e}")
-            raise RuntimeError(f"Failed to query {browser_type} history: {e}. Try closing the browser - history is locked while the browser is running.")
+            if "database is locked" in str(e).lower():
+                raise RuntimeError(f"🔒 BROWSER LOCKED: {browser_type.title()} is currently running and its database is locked. Please close {browser_type.title()} completely to analyze its history. You can restore tabs with Ctrl+Shift+T (Cmd+Shift+T on Mac).")
+            else:
+                raise RuntimeError(f"❌ ERROR: Failed to query {browser_type.title()} history: {e}")
         except Exception as e:
             logger.error(f"Unexpected error querying {browser_type} history: {e}")
-            raise RuntimeError(f"Failed to query {browser_type} history: {e}")
+            raise RuntimeError(f"❌ ERROR: Failed to query {browser_type.title()} history: {e}")
 
 async def tool_search_browser_history(query: str, CACHED_HISTORY: CachedHistory) -> List[HistoryEntryDict]:
     if not CACHED_HISTORY.has_history():
-        history_result = await tool_get_browser_history(7, CACHED_HISTORY, "", True)
-        # Handle the new return type
-        if isinstance(history_result, dict) and "history_entries" in history_result:
-            history = history_result["history_entries"]
-        else:
-            history = history_result  # Fallback for single browser mode
+        history = await tool_get_browser_history(7, CACHED_HISTORY, "", True)
     else:
         history = CACHED_HISTORY.get_history()
     
@@ -580,12 +653,3 @@ async def tool_search_browser_history(query: str, CACHED_HISTORY: CachedHistory)
             results.append(entry)
     
     return results
-
-def tool_test_browser_access() -> Dict[str, Any]:
-    """Quick test to see what's accessible"""
-    return {
-        "firefox": PATH_TO_FIREFOX_HISTORY is not None,
-        "chrome": PATH_TO_CHROME_HISTORY is not None,
-        "safari": PATH_TO_SAFARI_HISTORY is not None,
-        "message": "Run detect_active_browser for detailed status"
-    }
