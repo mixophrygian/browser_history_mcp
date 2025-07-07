@@ -77,7 +77,7 @@ async def categorize_browsing_history(history_data: List[HistoryEntryDict]) -> D
             'total_visits': sum(e.get('visit_count', 1) for e in uncategorized),
             'subcategories': {} # no subcategories for uncategorized
         }
-    
+   
     return dict(categorized)
 
 

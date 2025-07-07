@@ -1,0 +1,17 @@
+{
+    "globalShortcut": "Ctrl+Space",
+    "mcpServers": {
+        "Browser History MCP": {
+        "command": "/usr/local/bin/uv",
+        "type": "local",
+        "args": [
+            "run",
+            "--with",
+            "mcp[cli]",
+            "mcp",
+            "run",
+            "~/git-repos/browser-mcp-server/server/main.py"
+            ]
+        }
+    }
+}

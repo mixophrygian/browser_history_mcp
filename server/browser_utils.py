@@ -389,7 +389,7 @@ def check_safari_accessibility() -> Dict[str, Any]:
     return result
 # UTILS
 
-def tool_detect_active_browser() -> Dict[str, Any]:
+def tool_detect_available_browsers() -> Dict[str, Any]:
     browsers_to_check = []
     
     # Check Firefox
@@ -410,6 +410,7 @@ def tool_detect_active_browser() -> Dict[str, Any]:
     
     browsers_in_use = []
     for browser_name, db_path in browsers_to_check:
+        logger.info(f"Checking {browser_name} database at {db_path}")
         try:
             # Try to connect with read-only mode
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -444,7 +445,7 @@ PATH_TO_FIREFOX_HISTORY = get_firefox_history_path()
 PATH_TO_CHROME_HISTORY = get_chrome_history_path()
 PATH_TO_SAFARI_HISTORY = get_safari_history_path()
 
-async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: CachedHistory, browser_type: Optional[str] = None, all_browsers: bool = False) -> List[HistoryEntryDict]:
+async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: CachedHistory, browser_type: Optional[str] = None, all_browsers: bool = True) -> List[HistoryEntryDict]:
 
     if time_period_in_days <= 0:
         raise ValueError("time_period_in_days must be a positive integer")
@@ -459,7 +460,7 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
     if all_browsers:
         # Get history from all available browsers
         all_entries = []
-        browser_status = tool_detect_active_browser()
+        browser_status = tool_detect_available_browsers()
         
         if not browser_status:
             raise RuntimeError("No browser history databases found. Please ensure Firefox, Chrome, or Safari is installed and try again.")
@@ -486,7 +487,7 @@ async def tool_get_browser_history(time_period_in_days: int, CACHED_HISTORY: Cac
     else:
         # Single browser mode (original behavior)
         if browser_type is None:
-            browser_status = tool_detect_active_browser()
+            browser_status = tool_detect_available_browsers()
             if browser_status is None:
                 raise RuntimeError("This MCP currently only supports Firefox, Chrome, and Safari. Please ensure one of these browsers is installed and try again.")
             

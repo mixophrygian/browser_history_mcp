@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Any
 from mcp.server.fastmcp import FastMCP
 
 from local_types import HistoryEntryDict, CachedHistory, EnrichedSession, BrowserInsightsOutput
-from browser_utils import tool_detect_active_browser, tool_get_browser_history, check_safari_accessibility, tool_search_browser_history, tool_test_browser_access
+from browser_utils import tool_detect_available_browsers, tool_get_browser_history, check_safari_accessibility, tool_search_browser_history, tool_test_browser_access
 from prompts import PRODUCTIVITY_ANALYSIS_PROMPT, LEARNING_ANALYSIS_PROMPT, RESEARCH_TOPIC_EXTRACTION_PROMPT
 from analysis_utils import tool_analyze_browsing_sessions, tool_get_browsing_insights, tool_suggest_personalized_browser_categories
 
@@ -48,7 +48,7 @@ def detect_active_browser() -> Dict[str, Any]:
     Once we know which browser is active, we must tell the user that they will need to close the browser to get the history.
     Please remind them that they can restore their tabs by opening the browser again and possibly using Ctrl+Shift+T.
     """
-    return tool_detect_active_browser()
+    return tool_detect_available_browsers()
     
 
 

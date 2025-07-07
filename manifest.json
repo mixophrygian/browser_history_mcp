@@ -1,0 +1,83 @@
+{
+  "dxt_version": "0.1",
+  "name": "browser-mcp-server",
+  "display_name": "Browser History Analysis",
+  "version": "1.0.0",
+  "description": "A local MCP server to allow Claude to retrieve and analyze your browser history in Chrome and Firefox.",
+  "author": {
+    "name": "Eleanor Mazzarella",
+    "email": "eweigert+browserMCP@gmail.com"
+  },
+  "homepage": "https://github.com/mixophrygian/browser_history_mcp",
+  "documentation": "https://github.com/mixophrygian/browser_history_mcp",
+  "server": {
+    "type": "python",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "python",
+      "args": [
+        "${__dirname}/server/main.py"
+      ],
+      "env": {
+        "PYTHONPATH": "server/lib"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "detect_active_browser",
+      "description": "Detects active browsers and provides access recommendations"
+    },
+    {
+      "name": "get_browsing_insights",
+      "description": "Comprehensive analysis with multiple insights in one call"
+    },
+    {
+      "name": "analyze_browsing_sessions",
+      "description": "Groups visits into sessions with patterns and metrics"
+    },
+    {
+      "name": "search_browser_history",
+      "description": "Search cached history for specific queries"
+    },
+    {
+      "name": "suggest_personalized_browser_categories",
+      "description": "Returns uncategorized URLs for custom categorization"
+    },
+    {
+      "name": "test_browser_access",
+      "description": "Quick test for database accessibility"
+    },
+    {
+      "name": "diagnose_safari_support",
+      "description": "Safari support and accessibility diagnostics"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "productivity_analysis",
+      "description": "Comprehensive productivity assessment",
+      "text": "Analyze the browser history to provide actionable productivity insights and recommendations."
+    },
+    {
+      "name": "learning_analysis",
+      "description": "Deep learning pattern analysis",
+      "text": "Analyze browsing patterns to identify learning behaviors and educational content consumption."
+    },
+    {
+      "name": "research_topic_extraction",
+      "description": "Research topic extraction and summarization",
+      "text": "Extract and summarize research themes and focus areas from browser history."
+    }
+  ],
+  "keywords": [
+    "browser history",
+    "productivity analysis",
+    "browsing habits"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mixophrygian/browser_history_mcp"
+  }
+}

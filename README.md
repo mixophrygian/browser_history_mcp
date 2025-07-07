@@ -1,92 +1,208 @@
 # Browser History MCP Server
 
-A Model Context Protocol (MCP) server that provides access to browser history data for analysis and insights. Built using the official [python mcp sdk](https://github.com/modelcontextprotocol/python-sdk) and intended for local integration with Claude Desktop, for personal use. 
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/MCP-1.9.3+-green.svg)](https://modelcontextprotocol.io/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)](https://github.com/yourusername/browser-mcp-server)
 
-## Features
+A powerful Model Context Protocol (MCP) server that provides comprehensive access to browser history data for analysis and insights. Built using the official [Python MCP SDK](https://github.com/modelcontextprotocol/python-sdk), this tool is designed for local integration with Claude Desktop for personal productivity analysis.
 
-- Query Firefox and/or Chrome browser history
-- Group browsing sessions
-- Categorize websites by type
-- Analyze domain frequency
-- Identify learning patterns
-- Calculate productivity metrics
+## 📋 Table of Contents
 
-## Setup
+- [Features](#-features)
+- [Quick Start](#-quick-start)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Usage](#-usage)
+- [API Reference](#-api-reference)
+- [Browser Support](#-browser-support)
+- [Privacy & Security](#-privacy--security)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-### Automatic Setup (Recommended)
+## ✨ Features
 
-The server automatically detects your Firefox and Chrome profile directories based on your operating system:
+- 🔍 **Multi-Browser Support**: Query Firefox, Chrome, and (some versions of) Safari browser history
+- 📊 **Session Analysis**: Group browsing sessions with intelligent time-based clustering
+- 🏷️ **Smart Categorization**: Automatically categorize websites by type and purpose
+- 📈 **Domain Analytics**: Analyze domain frequency and visit patterns
+- 🎯 **Learning Insights**: Identify learning patterns and educational content consumption
+- ⚡ **Productivity Metrics**: Calculate productivity scores and distraction analysis
+- 🔄 **Real-time Access**: Direct database access for immediate insights
+- 🛡️ **Privacy-First**: Local processing with no data transmission
 
-- **macOS**: `~/Library/Application Support/Firefox/Profiles/[profile-id].default-release`
-- **Linux**: `~/.mozilla/firefox/[profile-id].default-release`
-- **Windows**: `%APPDATA%\Mozilla\Firefox\Profiles\[profile-id].default-release`
+## 🚀 Quick Start
 
-### Manual Configuration (if needed)
+1. **Install `uv` for dependency management**:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   uv sync
+   ```
 
-If automatic detection doesn't work, you can manually set the paths in `server.py`:
+2. **Test locally**:
+   ```bash
+   uv run mcp dev server/main.py
+   ```
 
-```python
-FIREFOX_PROFILE_DIR = "/path/to/your/firefox/profile"
-PATH_TO_FIREFOX_HISTORY = os.path.join(FIREFOX_PROFILE_DIR, "places.sqlite")
-```
+3. **Install for Claude Desktop** (you will need to restart the app afterwards):
+   ```bash
+   uv run mcp install server/main.py --name "Browser History MCP"
+   ```
 
-### Install Dependencies
+## 📦 Installation
 
-This project uses `uv` for dependency management. If you don't have `uv` installed, you can install it with:
+### Prerequisites
+
+- Python 3.12 or higher
+- Firefox, Chrome, or Safari browser
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+
+### Using uv (Recommended)
 
 ```bash
+# Install uv if you haven't already
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
-Then install the project dependencies:
-
-```bash
+# Clone and install
+git clone https://github.com/yourusername/browser-mcp-server.git
+cd browser-mcp-server
 uv sync
 ```
- 
-This will create a virtual environment and install all dependencies from `pyproject.toml`.
 
-Alternatively, if you prefer using pip:
+### Using pip
 
 ```bash
+git clone https://github.com/yourusername/browser-mcp-server.git
+cd browser-mcp-server
 pip install -e .
 ```
 
-### Debug Locally
-```bash
-uv run mcp dev server.py
+## ⚙️ Configuration
+
+### Automatic Setup (Recommended)
+
+The server automatically detects your browser profile directories:
+
+| OS | Firefox Path | Chrome Path |
+|---|---|---|
+| **macOS** | `~/Library/Application Support/Firefox/Profiles/[profile-id].default-release` | `~/Library/Application Support/Google/Chrome/Default` |
+| **Linux** | `~/.mozilla/firefox/[profile-id].default-release` | `~/.config/google-chrome/Default` |
+| **Windows** | `%APPDATA%\Mozilla\Firefox\Profiles\[profile-id].default-release` | `%LOCALAPPDATA%\Google\Chrome\User Data\Default` |
+
+### Manual Configuration
+
+If automatic detection fails, manually configure paths in `server/main.py`:
+
+```python
+FIREFOX_PROFILE_DIR = "/path/to/your/firefox/profile"
+CHROME_PROFILE_DIR = "/path/to/your/chrome/profile"
 ```
-_Tip: Select the local url that allows you to open the inspector with the token pre-filled._
 
-### Install the MCP for use in Claude Desktop
+## 🎯 Usage
+
+### Development Mode
+
 ```bash
-uv run mcp install server.py --name "Browser History MCP"
+uv run mcp dev server/main.py
 ```
 
-## Usage
+**Pro tip**: Open the version of the local URL with the token pre-filled.  Then hit "Connect"
 
-The server provides several tools and prompts for analyzing browser history:
+### Use with Claude Desktop
+
+```bash
+uv run mcp install server/main.py --name "Browser History MCP"
+```
+
+## 📚 API Reference
 
 ### Core Tools
 
-- `detect_active_browser`: Detects which browser is currently active and provides recommendations for accessing history
-- `get_browsing_insights`: Comprehensive analysis tool that retrieves history and performs multiple analyses in one call
-- `analyze_browsing_sessions`: Group visits into sessions with time patterns, categories, and metrics
-- `search_browser_history`: Search through cached browser history for specific queries
-- `suggest_personalized_browser_categories`: Returns uncategorized URLs for custom categorization
-- `test_browser_access`: Quick test to see what browser databases are accessible
-- `diagnose_safari_support`: Diagnose Safari support and accessibility for debugging
+| Tool | Description | Use Case |
+|------|-------------|----------|
+| `detect_active_browser` | Detects active browsers and provides access recommendations | Initial setup and troubleshooting |
+| `get_browsing_insights` | Comprehensive analysis with multiple insights in one call | Full productivity analysis |
+| `analyze_browsing_sessions` | Groups visits into sessions with patterns and metrics | Session-based analysis |
+| `search_browser_history` | Search cached history for specific queries | Targeted research |
+| `suggest_personalized_browser_categories` | Returns uncategorized URLs for custom categorization | Data organization |
+| `test_browser_access` | Quick test for database accessibility | Troubleshooting |
+| `diagnose_safari_support` | Safari support and accessibility diagnostics | Safari-specific issues |
 
 ### Analysis Prompts
 
-- `productivity_analysis`: Creates a comprehensive productivity analysis prompt
-- `learning_analysis`: Creates a deep learning pattern analysis prompt  
-- `research_topic_extraction`: Extract and summarize research topics from browsing history
+| Prompt | Purpose | Output |
+|--------|---------|--------|
+| `productivity_analysis` | Comprehensive productivity assessment | Productivity metrics and recommendations |
+| `learning_analysis` | Deep learning pattern analysis | Learning insights and progress tracking |
+| `research_topic_extraction` | Research topic extraction and summarization | Research themes and focus areas |
 
-### Browser Support
 
-The server supports Firefox, Chrome, and Safari browser history analysis. Note that browsers must be closed to access their history databases.
+## 🌐 Browser Support
 
-## Privacy
+| Browser | Status | Requirements |
+|---------|--------|--------------|
+| **Firefox** | ✅ Full Support | Browser must be closed |
+| **Chrome** | ✅ Full Support | Browser must be closed |
+| **Safari** | 🔄 Limited Support | Mostly older versions of Safari | 
 
-This tool accesses your browser history database directly. Ensure you understand the privacy implications and only use it in trusted environments.
+**Important**: Browsers must be closed to access their history databases due to file locking mechanisms.
+
+## 🔒 Privacy & Security
+
+### Data Handling
+
+- **Local Processing**: All data processing occurs locally on your machine
+- **No Data Transmission**: No browser history data is sent to external servers (aside from whatever Claude desktop is doing)
+- **Direct Database Access**: Reads directly from browser SQLite databases
+- **Temporary Caching**: Optional local caching for performance
+
+### Security Considerations
+
+- Only use in trusted environments
+- Ensure browser databases are not shared
+- Review cached data regularly
+- Close browsers before analysis
+
+### Best Practices
+
+1. **Close browsers** before running analysis
+2. **Review permissions** for any MCP client integration
+3. **Regular cleanup** of cached data if desired
+4. **Monitor access** to browser history files
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/browser-mcp-server.git
+cd browser-mcp-server
+
+# Install development dependencies
+uv sync
+
+# Run tests
+uv run pytest
+
+# Format code
+uv run black .
+uv run isort .
+```
+
+### Reporting Issues
+
+Please use the [GitHub Issues](https://github.com/yourusername/browser-mcp-server/issues) page to report bugs or request features.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+
+
+
+---
+
+**Note**: This tool is designed for personal use and local analysis. Please respect privacy and use responsibly.
