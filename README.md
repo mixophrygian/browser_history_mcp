@@ -15,6 +15,7 @@ A local Model Context Protocol (MCP) server that provides access to browser hist
 - [Configuration](#-configuration)
 - [API Reference](#-api-reference)
 - [Browser Support](#-browser-support)
+- [Troubleshooting](#-troubleshooting)
 - [Privacy & Security](#-privacy--security)
 - [License](#-license)
 
@@ -145,6 +146,27 @@ uv run mcp install server/main.py --name "Browser History MCP"
 | **Safari** | 🔄 Limited Support | Mostly older versions of Safari | 
 
 **Important**: Browsers must be closed to access their history databases due to file locking mechanisms.
+
+## Troubleshooting
+
+### MCP Config
+```
+{
+  "mcpServers": {
+    "Browser History MCP": {
+      "command": "/usr/local/bin/uv",
+      "args": [
+        "run",
+        "--with",
+        "mcp[cli]",
+        "mcp",
+        "run",
+        "[wherever-you-saved-the-repo]/browser-mcp-server/server/main.py"
+      ]
+    }
+  }
+}
+```
 
 ## 🔒 Privacy & Security
 
