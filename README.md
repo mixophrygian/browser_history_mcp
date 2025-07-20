@@ -134,7 +134,9 @@ uv run mcp install server/main.py --name "Browser History MCP"
 | `productivity_analysis` | Comprehensive productivity assessment | Productivity metrics and recommendations |
 | `learning_analysis` | Deep learning pattern analysis | Learning insights and progress tracking |
 | `research_topic_extraction` | Research topic extraction and summarization | Research themes and focus areas |
-
+| `generate_insights_report` | Create personalized browsing insights | Comprehensive activity and behavior report |
+| `compare_time_periods` | Compare browsing habits across time | Trend analysis and habit transformation metrics |
+| `export_visualization` | Generate data visualizations | Interactive charts and visual analytics |
 
 ## 🌐 Browser Support
 
