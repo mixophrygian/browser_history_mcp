@@ -5,9 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)](https://github.com/yourusername/browser-mcp-server)
 
-A local Model Context Protocol (MCP) server that provides access to browser history data for comprehensive analysis and insights. 
-
-Built using the [official python MCP sdk](https://github.com/modelcontextprotocol/python-sdk) this tool can be added to Claude desktop in a few minutes with a little set up in the terminal. 
+A local Model Context Protocol (MCP) server that provides access to browser history data for comprehensive analysis and insights.  Built using the [official python MCP sdk](https://github.com/modelcontextprotocol/python-sdk), this tool can be added to Claude desktop in a few minutes using the [Quick Start](#-quick-start) guide. 
 
 ## 📋 Table of Contents
 
@@ -157,28 +155,8 @@ uv run mcp install server/main.py --name "Browser History MCP"
 - **Direct Database Access**: Reads directly from browser SQLite databases
 - **Temporary Caching**: Optional local caching for performance
 
-### Security Considerations
-
-- Only use in trusted environments
-- Ensure browser databases are not shared
-- Review cached data regularly
-- Close browsers before analysis
-
-### Best Practices
-
-1. **Close browsers** before running analysis
-2. **Review permissions** for any MCP client integration
-3. **Regular cleanup** of cached data if desired
-4. **Monitor access** to browser history files
 
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-
-
-
----
-
-**Note**: This tool is designed for personal use and local analysis. Please respect privacy and use responsibly.
