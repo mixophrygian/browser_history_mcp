@@ -5,20 +5,21 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)](https://github.com/yourusername/browser-mcp-server)
 
-A powerful Model Context Protocol (MCP) server that provides comprehensive access to browser history data for analysis and insights. Built using the official [Python MCP SDK](https://github.com/modelcontextprotocol/python-sdk), this tool is designed for local integration with Claude Desktop for personal productivity analysis.
+A local Model Context Protocol (MCP) server that provides access to browser history data for comprehensive analysis and insights. 
+
+Built using the [official python MCP sdk](https://github.com/modelcontextprotocol/python-sdk) this tool can be added to Claude desktop in a few minutes with a little set up in the terminal. 
 
 ## 📋 Table of Contents
 
 - [Features](#-features)
 - [Quick Start](#-quick-start)
-- [Installation](#-installation)
+- [Installation](#-detailed-installation)
 - [Configuration](#-configuration)
-- [Usage](#-usage)
 - [API Reference](#-api-reference)
 - [Browser Support](#-browser-support)
 - [Privacy & Security](#-privacy--security)
-- [Contributing](#-contributing)
 - [License](#-license)
+
 
 ## ✨ Features
 
@@ -44,12 +45,12 @@ A powerful Model Context Protocol (MCP) server that provides comprehensive acces
    uv run mcp dev server/main.py
    ```
 
-3. **Install for Claude Desktop** (you will need to restart the app afterwards):
+3. **Install for Claude Desktop** (you will need to restart Claude Desktop afterwards):
    ```bash
    uv run mcp install server/main.py --name "Browser History MCP"
    ```
 
-## 📦 Installation
+## 📦 Detailed installation
 
 ### Prerequisites
 
@@ -97,18 +98,6 @@ If automatic detection fails, manually configure paths in `server/main.py`:
 FIREFOX_PROFILE_DIR = "/path/to/your/firefox/profile"
 CHROME_PROFILE_DIR = "/path/to/your/chrome/profile"
 ```
-
-## 🎯 Usage
-
-### Recommended Workflow
-
-1. **Health Check**: `health_check` - Verify the MCP server is working
-2. **Browser Status**: `check_browser_status` - See which browsers are available/locked
-3. **Get Data**: `get_browser_history` - Retrieve raw browser history data
-4. **Analyze**: `analyze_browser_history` - Choose analysis level:
-   - `analysis_type="quick_summary"` - Basic stats (fastest)
-   - `analysis_type="basic"` - Domain analysis and categorization
-   - `analysis_type="comprehensive"` - Full analysis with sessions (default)
 
 ### Development Mode
 
@@ -180,31 +169,6 @@ uv run mcp install server/main.py --name "Browser History MCP"
 3. **Regular cleanup** of cached data if desired
 4. **Monitor access** to browser history files
 
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/browser-mcp-server.git
-cd browser-mcp-server
-
-# Install development dependencies
-uv sync
-
-# Run tests
-uv run pytest
-
-# Format code
-uv run black .
-uv run isort .
-```
-
-### Reporting Issues
-
-Please use the [GitHub Issues](https://github.com/yourusername/browser-mcp-server/issues) page to report bugs or request features.
 
 ## 📄 License
 

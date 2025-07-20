@@ -53,7 +53,7 @@ BROWSING_CATEGORIES = { # update this to include sites you want to track
         }
     },
     
-    'learning': {
+    'education': {
         'domains': [
             'coursera.org', 'udemy.com', 'edx.org', 'khanacademy.org',
             'udacity.com', 'pluralsight.com', 'lynda.com', 'skillshare.com',
@@ -183,6 +183,21 @@ BROWSING_CATEGORIES = { # update this to include sites you want to track
             'marketing': ['mailchimp.com', 'hootsuite.com', 'buffer.com'],
             'design': ['canva.com', 'figma.com', 'adobe.com'],
             'analytics': ['tableau.com', 'powerbi.microsoft.com']
+        }
+    },
+    
+    'travel': {
+        'domains': [
+            'booking.com', 'expedia.com', 'tripadvisor.com', 'airbnb.com', 'kayak.com',
+            'skyscanner.com', 'hotels.com', 'trivago.com', 'orbitz.com', 'agoda.com',
+            'lonelyplanet.com', 'viator.com'
+        ],
+        'patterns': [r'/flight/', r'/hotel/', r'/booking/', r'/travel/', r'/stay/'],
+        'subcategories': {
+            'lodging': ['booking.com', 'airbnb.com', 'agoda.com', 'hotels.com'],
+            'flights': ['expedia.com', 'kayak.com', 'skyscanner.com'],
+            'reviews': ['tripadvisor.com', 'lonelyplanet.com'],
+            'meta_search': ['trivago.com', 'orbitz.com', 'viator.com']
         }
     }
 }

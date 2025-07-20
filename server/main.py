@@ -1,6 +1,7 @@
+#! /usr/bin/env python3
 
-from typing import Dict, List, Optional, Any, Union
 import time
+from typing import Dict, List, Optional, Any, Union
 from mcp.server.fastmcp import FastMCP
 
 from local_types import HistoryEntryDict, CachedHistory
@@ -10,7 +11,7 @@ from analysis_utils import tool_get_browsing_insights, tool_suggest_personalized
 
 CACHED_HISTORY = CachedHistory(history=[], time_period_in_days=0, browser_type="auto-detected")
 
-mcp = FastMCP(name="Browser History MCP", instructions="This server makes it possible to query a user's Firefox, Chrome, or Safari browser history, analyze it, and create a thoughtful report with an optional lense of productivity or learning.")
+mcp = FastMCP("browser-mcp-server")
 
 @mcp.tool()
 def check_browser_status() -> Dict[str, Any]:
@@ -26,6 +27,7 @@ def check_browser_status() -> Dict[str, Any]:
     - active_browsers: List of browsers that are currently running
     
     IMPORTANT: If status is "browser_locked", you MUST tell the user to close the specified browser(s).
+
     """
     result = tool_detect_available_browsers()
     

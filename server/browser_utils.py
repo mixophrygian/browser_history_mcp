@@ -456,7 +456,7 @@ def tool_detect_available_browsers() -> Dict[str, Any]:
                     "status": "browser_locked",
                     "error_message": f"🔒 BROWSER LOCKED: {browser_name.title()} is currently running and its database is locked.",
                     "user_action_required": True,
-                    "recommended_action": f"❗ IMPORTANT: Please close {browser_name.title()} completely to analyze its history. You can restore your tabs later with Ctrl+Shift+T (Cmd+Shift+T on Mac).",
+                    "recommended_action": f"❗ IMPORTANT: Please close all browsers, especially {browser_name.title()} completely to analyze its history. You can restore your tabs later with Ctrl+Shift+T (Cmd+Shift+T on Mac).",
                     "technical_details": f"Database error: {str(e)}"
                 }
             else:
@@ -470,7 +470,7 @@ def tool_detect_available_browsers() -> Dict[str, Any]:
                 "status": "error",
                 "error_message": f"❌ ERROR: Cannot access {browser_name.title()} database.",
                 "user_action_required": True,
-                "recommended_action": f"Please close {browser_name.title()} completely and try again. You can restore your tabs later with Ctrl+Shift+T (Cmd+Shift+T on Mac).",
+                "recommended_action": f"Please close all browsers, especially {browser_name.title()} completely and try again. You can restore your tabs later with Ctrl+Shift+T (Cmd+Shift+T on Mac).",
                 "technical_details": f"Technical error: {str(e)}"
             }
     

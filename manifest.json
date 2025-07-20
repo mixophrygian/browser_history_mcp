@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "browser-mcp-server",
-  "display_name": "Browser History Analysis",
+  "display_name": "Browser History Analysis MCP",
   "version": "1.0.0",
   "description": "A local MCP server to allow Claude to retrieve and analyze your browser history in Chrome and Firefox.",
   "author": {
@@ -10,6 +10,12 @@
   },
   "homepage": "https://github.com/mixophrygian/browser_history_mcp",
   "documentation": "https://github.com/mixophrygian/browser_history_mcp",
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.12"
+    }
+  },
   "server": {
     "type": "python",
     "entry_point": "server/main.py",
@@ -19,7 +25,7 @@
         "${__dirname}/server/main.py"
       ],
       "env": {
-        "PYTHONPATH": "server/lib"
+        "PYTHONPATH": "${__dirname}/server/lib"
       }
     }
   },
@@ -72,8 +78,9 @@
   ],
   "keywords": [
     "browser history",
-    "productivity analysis",
-    "browsing habits"
+    "productivity",
+    "browsing habits",
+    "python"
   ],
   "license": "MIT",
   "repository": {
