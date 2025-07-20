@@ -60,7 +60,7 @@ BROWSING_CATEGORIES = { # update this to include sites you want to track
             'masterclass.com', 'brilliant.org', 'datacamp.com', 'codecademy.com',
             'freecodecamp.org', 'mit.edu', 'stanford.edu', 'harvard.edu',
             'arxiv.org', 'scholar.google.com', 'jstor.org', 'pubmed.ncbi.nlm.nih.gov',
-            'wikipedia.org', 'wikihow.com', 'instructables.com'
+            'wikipedia.org', 'wikihow.com', 'instructables.com', 'oreilly.com'
         ],
         'patterns': [
             r'/course/', r'/tutorial/', r'/learn/', r'/guide/', r'/how-to',
@@ -144,7 +144,8 @@ BROWSING_CATEGORIES = { # update this to include sites you want to track
             'webmd.com', 'mayoclinic.org', 'healthline.com', 'medlineplus.gov',
             'nih.gov', 'cdc.gov', 'who.int', 'drugs.com', 'rxlist.com',
             'myfitnesspal.com', 'fitbit.com', 'strava.com', 'headspace.com',
-            'calm.com', 'betterhelp.com', 'talkspace.com', 'zocdoc.com'
+            'calm.com', 'betterhelp.com', 'talkspace.com', 'zocdoc.com',
+            'neko.com'
         ],
         'patterns': [r'/health/', r'/medical/', r'/symptoms/', r'/conditions/'],
         'subcategories': {
@@ -190,7 +191,7 @@ BROWSING_CATEGORIES = { # update this to include sites you want to track
         'domains': [
             'booking.com', 'expedia.com', 'tripadvisor.com', 'airbnb.com', 'kayak.com',
             'skyscanner.com', 'hotels.com', 'trivago.com', 'orbitz.com', 'agoda.com',
-            'lonelyplanet.com', 'viator.com'
+            'lonelyplanet.com', 'viator.com', 'greatwolf.com'
         ],
         'patterns': [r'/flight/', r'/hotel/', r'/booking/', r'/travel/', r'/stay/'],
         'subcategories': {

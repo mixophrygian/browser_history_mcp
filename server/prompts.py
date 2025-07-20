@@ -84,3 +84,96 @@ RESEARCH_TOPIC_EXTRACTION_PROMPT = """
     
     Format as a research notebook with topics, key findings, and open questions.
     """
+
+GENERATE_INSIGHTS_REPORT_PROMPT = """
+    Create a personalized insights report based on your browsing patterns:
+
+    1. **Overview Summary**
+       - Total browsing time and active days
+       - Most visited categories and domains
+       - Peak activity periods and patterns
+
+    2. **Productivity Metrics**
+       - Work/learning vs entertainment balance
+       - Focus periods and distraction patterns
+       - Context switching frequency and impact
+
+    3. **Content Consumption Analysis**
+       - Types of content most frequently accessed
+       - Time distribution across media types
+       - Reading vs interactive content patterns
+
+    4. **Behavioral Patterns**
+       - Daily and weekly routines
+       - Common browsing sequences
+       - Habit triggers and patterns
+
+    5. **Personalized Recommendations**
+       - Suggested schedule optimizations
+       - Focus improvement opportunities
+       - Content consumption balancing tips
+
+    Present as a comprehensive report with data visualizations and actionable insights.
+    """
+
+COMPARE_TIME_PERIODS_PROMPT = """
+    Compare your browsing habits across different time periods:
+
+    1. **Time Period Analysis**
+       - Compare daily/weekly/monthly patterns
+       - Identify significant behavior changes
+       - Track long-term trends and shifts
+
+    2. **Category Evolution**
+       - Changes in category time distribution
+       - New or abandoned interests
+       - Shifting productivity patterns
+
+    3. **Habit Transformation**
+       - Progress on reducing time-sink websites
+       - Improvements in focus metrics
+       - Changes in learning patterns
+
+    4. **Productivity Trends**
+       - Work efficiency changes
+       - Focus session duration trends
+       - Context switching frequency changes
+
+    5. **Impact Assessment**
+       - Effectiveness of previous recommendations
+       - Progress towards goals
+       - Areas needing continued attention
+
+    Format as a comparative analysis with clear before/after metrics and trend visualization suggestions.
+    """
+
+EXPORT_VISUALIZATION_PROMPT = """
+    Export your browsing data as interactive visualizations:
+
+    1. **Time-Based Visualizations**
+       - Daily/weekly activity heatmaps
+       - Category distribution timelines
+       - Peak usage period charts
+
+    2. **Network Analysis**
+       - Domain relationship networks
+       - Category interaction flows
+       - Session transition maps
+
+    3. **Pattern Visualizations**
+       - Focus/distraction cycle plots
+       - Learning progression graphs
+       - Productivity trend lines
+
+    4. **Interactive Elements**
+       - Time period selectors
+       - Category filters
+       - Drill-down capabilities
+
+    5. **Export Options**
+       - Interactive HTML dashboards
+       - Static report PDFs
+       - Raw data exports
+
+    Include specific visualization recommendations based on the data patterns identified.
+    """

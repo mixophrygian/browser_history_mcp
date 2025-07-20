@@ -6,7 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from local_types import HistoryEntryDict, CachedHistory
 from browser_utils import tool_detect_available_browsers, tool_get_browser_history, check_safari_accessibility, tool_search_browser_history 
-from prompts import PRODUCTIVITY_ANALYSIS_PROMPT, LEARNING_ANALYSIS_PROMPT, RESEARCH_TOPIC_EXTRACTION_PROMPT
+from prompts import PRODUCTIVITY_ANALYSIS_PROMPT, LEARNING_ANALYSIS_PROMPT, RESEARCH_TOPIC_EXTRACTION_PROMPT, GENERATE_INSIGHTS_REPORT_PROMPT, EXPORT_VISUALIZATION_PROMPT, COMPARE_TIME_PERIODS_PROMPT
 from analysis_utils import tool_get_browsing_insights, tool_suggest_personalized_browser_categories, tool_get_quick_insights
 
 CACHED_HISTORY = CachedHistory(history=[], time_period_in_days=0, browser_type="auto-detected")
@@ -123,6 +123,21 @@ def learning_analysis() -> str:
 def research_topic_extraction() -> str:
     """Extract and summarize research topics from browsing history"""
     return RESEARCH_TOPIC_EXTRACTION_PROMPT
+
+@mcp.prompt()
+def generate_insights_report() -> str:
+    """Generate a personalized insights report based on browsing patterns"""
+    return GENERATE_INSIGHTS_REPORT_PROMPT
+
+@mcp.prompt()
+def export_visualization() -> str:
+    """Export your browsing data as interactive visualizations"""
+    return EXPORT_VISUALIZATION_PROMPT
+
+@mcp.prompt()
+def compare_time_periods() -> str:
+    """Compare your browsing habits across different time periods"""
+    return COMPARE_TIME_PERIODS_PROMPT
 
 if __name__ == "__main__":
     mcp.run()
